@@ -1,0 +1,4 @@
+# Community alternate names / informal variants (TSV: variant<TAB>law_id)
+# law_id should match normalized abbreviation key used in the catalog (e.g. bgb).
+Zivilgesetzbuch	bgb
+Civil Code	bgb

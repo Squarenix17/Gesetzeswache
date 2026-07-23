@@ -1,0 +1,120 @@
+// Package domain holds shared entities for gesetzeswache.
+// Entities: Law, LawVariant, StandCitation, GazetteIssue, IssueLawLink,
+// FreshnessRecord, SyncAttempt.
+package domain
+
+import "time"
+
+// FreshnessState is the verified freshness of a law relative to BGBl.
+type FreshnessState string
+
+const (
+	FreshnessConfirmedCurrent FreshnessState = "confirmed_current"
+	FreshnessConfirmedStale   FreshnessState = "confirmed_stale"
+	FreshnessUncertain        FreshnessState = "uncertain"
+)
+
+// LinkClass distinguishes confirmed GII feed links from heuristics.
+type LinkClass string
+
+const (
+	LinkConfirmed LinkClass = "confirmed"
+	LinkHeuristic LinkClass = "heuristic"
+)
+
+// VerificationMethod describes how existence/freshness evidence was obtained.
+type VerificationMethod string
+
+const (
+	MethodFeeds     VerificationMethod = "feeds"
+	MethodProbeOnly VerificationMethod = "probe_only"
+	MethodMixed     VerificationMethod = "mixed"
+)
+
+// Law is a federal statute identity (metadata only; no full text).
+type Law struct {
+	ID           string `json:"id"`
+	Abbreviation string `json:"abbreviation"`
+	Title        string `json:"title"`
+	GIIPath      string `json:"gii_path"` // relative path / slug on GII
+	GIIURL       string `json:"gii_url"`
+}
+
+// LawVariant maps an informal/alternate name to a canonical law.
+type LawVariant struct {
+	Variant string `json:"variant"`
+	LawID   string `json:"law_id"`
+}
+
+// StandCitation is the GII "Stand" signal, raw and parsed.
+type StandCitation struct {
+	LawID      string     `json:"law_id"`
+	Raw        string     `json:"raw"`
+	Teil       int        `json:"teil,omitempty"` // 1 or 2
+	Year       int        `json:"year,omitempty"`
+	Number     string     `json:"number,omitempty"` // issue number, may include letter suffix
+	Page       string     `json:"page,omitempty"`
+	Date       *time.Time `json:"date,omitempty"`
+	ParseOK    bool       `json:"parse_ok"`
+	ParseNotes string     `json:"parse_notes,omitempty"`
+}
+
+// GazetteIssue is an observed BGBl promulgation.
+type GazetteIssue struct {
+	ID                 string              `json:"id"` // e.g. "BGBl-1/2026/209"
+	Teil               int                 `json:"teil"`
+	Year               int                 `json:"year"`
+	Number             string              `json:"number"`
+	PublishedAt        *time.Time          `json:"published_at,omitempty"`
+	Title              string              `json:"title,omitempty"`
+	ELIURL             string              `json:"eli_url,omitempty"`
+	DiscoverySources   []string            `json:"discovery_sources,omitempty"`
+	ExistenceConfidence string             `json:"existence_confidence"` // high|low
+	Matched            bool                `json:"matched"`
+	FirstSeenAt        time.Time           `json:"first_seen_at"`
+}
+
+// IssueLawLink connects a gazette issue to an affected law.
+type IssueLawLink struct {
+	IssueID   string    `json:"issue_id"`
+	LawID     string    `json:"law_id"`
+	Class     LinkClass `json:"class"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// FreshnessRecord is the current freshness evaluation for a law.
+type FreshnessRecord struct {
+	LawID              string             `json:"law_id"`
+	State              FreshnessState     `json:"state"`
+	Confidence         string             `json:"confidence"` // high|medium|low
+	Method             VerificationMethod `json:"method"`
+	EvaluatedAt        time.Time          `json:"evaluated_at"`
+	NewerIssueIDs      []string           `json:"newer_issue_ids,omitempty"`
+	Rationale          string             `json:"rationale,omitempty"`
+}
+
+// SyncAttempt records one background sync job outcome.
+type SyncAttempt struct {
+	ID        string    `json:"id"`
+	Source    string    `json:"source"` // toc|stand|gii_feed|bgbl_feed|eli_probe
+	StartedAt time.Time `json:"started_at"`
+	EndedAt   time.Time `json:"ended_at"`
+	Success   bool      `json:"success"`
+	Error     string    `json:"error,omitempty"`
+	Detail    string    `json:"detail,omitempty"`
+}
+
+// SyncStatus summarizes last successful sync times per source.
+type SyncStatus struct {
+	CatalogReady          bool       `json:"catalog_ready"`
+	LastTOCSuccess        *time.Time `json:"last_toc_success,omitempty"`
+	LastGIIFeedSuccess    *time.Time `json:"last_gii_feed_success,omitempty"`
+	LastBGBlFeedSuccess   *time.Time `json:"last_bgbl_feed_success,omitempty"`
+	LastELIProbeSuccess   *time.Time `json:"last_eli_probe_success,omitempty"`
+	LastReconcileAt       *time.Time `json:"last_reconcile_at,omitempty"`
+	DataFresh             bool       `json:"data_fresh"` // within max-age for confirmed claims
+	MaxAge                DurationJSON `json:"max_age"`
+}
+
+// DurationJSON is a duration exposed as string in JSON helpers elsewhere.
+type DurationJSON time.Duration

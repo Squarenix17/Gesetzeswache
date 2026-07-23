@@ -1,0 +1,12 @@
+services:
+  gew:
+    image: ghcr.io/squarenix17/gesetzeswache:latest
+    container_name: gew
+    ports:
+      - "8080:8080"
+    volumes:
+      - gew-data:/tmp
+    restart: unless-stopped
+
+volumes:
+  gew-data:

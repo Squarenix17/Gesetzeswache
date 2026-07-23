@@ -197,17 +197,24 @@ Additional sync intervals, source URLs, and tuning knobs: [`internal/config/conf
 
 ### Docker
 
-Published image: `ghcr.io/squarenix17/gesetzeswache:latest`
-
-The image entrypoint is `/gew`. It sets `GEW_VARIANTS_PATH=/variants/variants.tsv` and `GEW_STORE_PATH=/tmp/gesetzeswache.db`. Mount a volume for persistent store data:
+Image: `ghcr.io/squarenix17/gesetzeswache:latest` (pinned tags on [releases](https://github.com/Squarenix17/gesetzeswache/releases))
 
 ```bash
-docker run --rm -p 8080:8080 \
-  -v gesetzeswache-data:/tmp \
-  ghcr.io/squarenix17/gesetzeswache:latest
+docker compose up -d
+curl http://127.0.0.1:8080/readyz
 ```
 
-Override any `GEW_*` variable with `-e` as needed.
+Stop:
+
+```bash
+docker compose down
+```
+
+Override `GEW_*` in [`docker-compose.yml`](docker-compose.yml) under `environment:`, or run manually:
+
+```bash
+docker run --rm -p 8080:8080 -v gew-data:/tmp ghcr.io/squarenix17/gesetzeswache:latest
+```
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 

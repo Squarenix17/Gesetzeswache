@@ -4,6 +4,8 @@ alwaysApply: true
 ---
 # Git Workflow
 
+> **Commits:** The agent never runs `git commit`. See the no-agent-commits rule.
+
 ## Commit Message Format
 ```
 <type>: <description>

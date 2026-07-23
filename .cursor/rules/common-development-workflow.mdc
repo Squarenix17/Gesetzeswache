@@ -27,7 +27,7 @@ The Feature Implementation Workflow describes the development pipeline: planning
    - Address CRITICAL and HIGH issues
    - Fix MEDIUM issues when possible
 
-4. **Commit & Push**
-   - Detailed commit messages
-   - Follow conventional commits format
+4. **User Commits**
+   - Agent leaves changes uncommitted for the user to review
+   - User writes commit messages following conventional commits format
    - See the git workflow rule for commit message format and PR process

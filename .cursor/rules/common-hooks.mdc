@@ -1,0 +1,41 @@
+---
+description: "Hooks system: types, auto-accept permissions, TodoWrite best practices"
+alwaysApply: true
+---
+# Hooks System
+
+## Hook Types
+
+Cursor lifecycle hooks (configured in `.cursor/hooks.json`):
+
+- **sessionStart** / **sessionEnd**: Session bootstrap and teardown
+- **beforeShellExecution** / **afterShellExecution**: Shell command guardrails and logging
+- **beforeReadFile** / **afterFileEdit**: Sensitive file warnings and post-edit checks
+- **preToolUse** / **postToolUse** / **postToolUseFailure**: Generic tool-use hooks (all tools)
+- **beforeMCPExecution** / **afterMCPExecution**: MCP audit logging
+- **beforeSubmitPrompt**: Prompt validation (e.g. secret detection)
+- **subagentStart** / **subagentStop**: Subagent observability
+- **preCompact** / **stop**: Context compaction and final verification
+
+## Auto-Accept Permissions
+
+Use with caution:
+- Enable for trusted, well-defined plans
+- Disable for exploratory work
+- Never use dangerously-skip-permissions flag
+- Configure `allowedTools` in `~/.cursor/cli-config.json` instead
+
+## TodoWrite Best Practices
+
+Use TodoWrite tool to:
+- Track progress on multi-step tasks
+- Verify understanding of instructions
+- Enable real-time steering
+- Show granular implementation steps
+
+Todo list reveals:
+- Out of order steps
+- Missing items
+- Extra unnecessary items
+- Wrong granularity
+- Misinterpreted requirements

@@ -1,0 +1,16 @@
+---
+description: "Java hooks extending common rules"
+globs: ["**/*.java", "**/pom.xml", "**/build.gradle", "**/build.gradle.kts"]
+alwaysApply: false
+---
+# Java Hooks
+
+> This file extends [common/hooks.md](../common/hooks.md) with Java-specific content.
+
+## afterFileEdit Hooks
+
+Configure in `~/.cursor/hooks.json` or project `.cursor/hooks.json`:
+
+- **google-java-format**: Auto-format `.java` files after edit
+- **checkstyle**: Run style checks after editing Java files
+- **./mvnw compile** or **./gradlew compileJava**: Verify compilation after changes

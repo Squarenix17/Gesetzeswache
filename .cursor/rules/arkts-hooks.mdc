@@ -1,0 +1,129 @@
+---
+description: "ArkTS hooks extending common rules"
+globs: ["**/*.ets", "**/*.ts", "**/module.json5", "**/oh-package.json5"]
+alwaysApply: false
+---
+# HarmonyOS / ArkTS Hooks
+
+> This file extends [common/hooks.md](../common/hooks.md) with HarmonyOS-specific build and validation hooks.
+
+Configure in `~/.cursor/hooks.json` or project `.cursor/hooks.json`.
+
+## Build Commands
+
+### HAP Package Build
+
+```bash
+# Build HAP package (global hvigor environment)
+hvigorw assembleHap -p product=default
+
+# Build with specific module
+hvigorw assembleHap -p module=entry -p product=default
+
+# Clean build
+hvigorw clean
+```
+
+### DevEco Studio CLI
+
+```bash
+# Check project structure
+hvigorw --version
+
+# Install dependencies
+ohpm install
+
+# Update dependencies
+ohpm update
+```
+
+## Recommended afterFileEdit Hooks
+
+### After Editing .ets/.ts Files
+
+Run hvigor build to check for ArkTS compilation errors:
+
+```json
+{
+  "version": 1,
+  "hooks": {
+    "afterFileEdit": [
+      {
+        "command": "hvigorw assembleHap -p product=default 2>&1 | tail -20",
+        "matcher": "**/*.{ets,ts}",
+        "timeout": 60000,
+        "description": "Compile-check edited ArkTS/TypeScript files"
+      }
+    ]
+  }
+}
+```
+
+### After Editing module.json5
+
+Validate permission and ability declarations:
+
+```json
+{
+  "version": 1,
+  "hooks": {
+    "afterFileEdit": [
+      {
+        "command": "echo '[HarmonyOS] module.json5 modified - verify permissions and abilities'",
+        "matcher": "**/module.json5"
+      }
+    ]
+  }
+}
+```
+
+### After Editing oh-package.json5
+
+Reinstall dependencies:
+
+```json
+{
+  "version": 1,
+  "hooks": {
+    "afterFileEdit": [
+      {
+        "command": "ohpm install 2>&1 | tail -10",
+        "matcher": "**/oh-package.json5",
+        "timeout": 30000
+      }
+    ]
+  }
+}
+```
+
+## preToolUse Hooks
+
+### V1 Decorator Guard
+
+Warn when code contains V1 state management decorators:
+
+```json
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "command": "echo '[HarmonyOS] Reminder: Use @ComponentV2 / @Local / @Param - V1 decorators (@State, @Prop, @Link) are prohibited'"
+      }
+    ]
+  }
+}
+```
+
+## Validation Checklist
+
+After each implementation cycle, verify:
+
+- [ ] `hvigorw assembleHap` completes without errors
+- [ ] No V1 decorators in new or modified `.ets` files
+- [ ] No `@ohos.router` imports in new or modified files
+- [ ] All API permissions declared in `module.json5`
+- [ ] All dependencies listed in `oh-package.json5`
+- [ ] Resource strings added to all i18n directories
+- [ ] Dark theme colors provided for new color resources

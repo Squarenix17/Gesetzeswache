@@ -106,7 +106,7 @@ func (c *Client) Get(ctx context.Context, rawURL, etag, modSince string) (body [
 	if err != nil {
 		return nil, "", 0, err
 	}
-	req.Header.Set("User-Agent", "gesetzeswache/0.1 (+https://github.com/Squarenix17/gesetzeswache)")
+	req.Header.Set("User-Agent", "gew/0.1 (+https://github.com/Squarenix17/gesetzeswache)")
 	if etag != "" {
 		req.Header.Set("If-None-Match", etag)
 	}

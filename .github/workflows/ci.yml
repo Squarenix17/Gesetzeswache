@@ -22,11 +22,32 @@ jobs:
   docker:
     needs: test
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'release'
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
-      - name: Build image
-        run: docker build -t ghcr.io/${{ github.repository }}:latest .
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push image
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SHORT_SHA: ${{ github.sha }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          IMAGE=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')
+          SHORT_SHA=$(echo "${SHORT_SHA}" | cut -c1-7)
+          docker build -t "${IMAGE}:latest" .
+          if [ "${EVENT_NAME}" = "push" ]; then
+            docker tag "${IMAGE}:latest" "${IMAGE}:sha-${SHORT_SHA}"
+            docker push "${IMAGE}:latest"
+            docker push "${IMAGE}:sha-${SHORT_SHA}"
+          fi
+          if [ "${EVENT_NAME}" = "release" ]; then
+            docker tag "${IMAGE}:latest" "${IMAGE}:${TAG}"
+            docker push "${IMAGE}:${TAG}"
+          fi

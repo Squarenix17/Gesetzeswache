@@ -13,7 +13,7 @@ import (
 // Run executes a CLI command against the in-process service.
 func Run(ctx context.Context, svc *service.Service, args []string) int {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: gesetzeswache <serve|resolve|freshness|stale|recheck|sync-status|export|mcp> ...")
+		fmt.Fprintln(os.Stderr, "usage: gew <serve|resolve|freshness|stale|recheck|sync-status|export|mcp> ...")
 		return 2
 	}
 	switch args[0] {

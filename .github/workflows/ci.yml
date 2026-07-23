@@ -18,7 +18,7 @@ jobs:
       - name: Vet
         run: go vet ./...
       - name: Build
-        run: CGO_ENABLED=0 go build -o bin/gesetzeswache ./cmd/gesetzeswache
+        run: CGO_ENABLED=0 go build -o bin/gew ./cmd/gesetzeswache
   docker:
     needs: test
     runs-on: ubuntu-latest

@@ -89,6 +89,8 @@ Any client: RAG pipeline, search index, agent tool, or application, must treat f
 
 Optional: set `GEW_REFUSE_EXPORT_STALE=true` so the server rejects export for `confirmed_stale` laws.
 
+Amendment-by-reference parents (e.g. MiLoG) expose `freshness.linked_instruments`: **section-scoped** ordinances with Inkrafttreten (`effective_from`), `section_hint`, and `status` (`current`/`future` by default; superseded `past` only with `include=past`). They are not full-law replacements — export the child slug (e.g. `milov5`) for operative § text.
+
 ### REST
 
 | Method | Path | Notes |
@@ -96,15 +98,16 @@ Optional: set `GEW_REFUSE_EXPORT_STALE=true` so the server rejects export for `c
 | GET | `/healthz` | Liveness |
 | GET | `/readyz` | Readiness (sync initialized) |
 | GET | `/metrics` | Prometheus text metrics (unauthenticated) |
-| GET, POST | `/v1/resolve?q=` | Resolve law + freshness |
-| GET | `/v1/freshness?id=` | Freshness for a known ID (or `q=`) |
+| GET, POST | `/v1/resolve?q=` | Resolve law + freshness (`include=past`, `include=linked` optional) |
+| GET | `/v1/freshness?id=` | Freshness for a known ID (or `q=`; same `include`) |
 | GET | `/v1/stale` | List `confirmed_stale` laws |
 | GET | `/v1/sync/status` | Sync and readiness status |
-| GET, POST | `/v1/export?q=&format=hierarchical\|chunked\|flat\|normtext` | On-demand text export |
+| GET, POST | `/v1/export?q=&format=hierarchical\|chunked\|flat\|normtext` | On-demand text export (same `include`) |
 | POST | `/v1/recheck` | Force re-verification (auth required) |
 
 ```bash
 curl 'http://127.0.0.1:8080/v1/resolve?q=BGB'
+curl 'http://127.0.0.1:8080/v1/resolve?q=MiLoG&include=linked'
 curl 'http://127.0.0.1:8080/v1/export?q=BGB&format=hierarchical'
 curl 'http://127.0.0.1:8080/v1/sync/status'
 curl -s 'http://127.0.0.1:8080/metrics' | head
@@ -115,6 +118,7 @@ curl -s 'http://127.0.0.1:8080/metrics' | head
 ```bash
 gew serve                    # HTTP API + background sync
 gew resolve BGB              # Resolve law + freshness
+gew resolve --include=past MiLoG
 gew freshness bgb            # Freshness only
 gew stale                    # List confirmed_stale laws
 gew recheck bgb              # Force re-verification
@@ -145,6 +149,8 @@ CLI `recheck` and MCP `force_recheck` call the local process directly (no HTTP t
 ### Variants
 
 Informal names (e.g. `Zivilgesetzbuch` → `bgb`) live in [`variants/variants.tsv`](variants/variants.tsv) as TSV: `variant<TAB>law_id`. Override with `GEW_VARIANTS_PATH`.
+
+Linked ordinances (amendment-by-reference) live in [`variants/linked_instruments.tsv`](variants/linked_instruments.tsv); override with `GEW_LINKED_INSTRUMENTS_PATH`.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -231,6 +237,7 @@ docker run --rm -p 8080:8080 -v gew-data:/tmp ghcr.io/squarenix17/gesetzeswache:
 - [x] Integration tests with mocked GII/BGBl fixtures
 - [x] Bulk Stand refresh for full catalog
 - [x] Metrics / observability endpoints
+- [x] Section-scoped linked instruments (Inkrafttreten status; `include=past` / `include=linked`)
 
 See the [open issues](https://github.com/Squarenix17/gesetzeswache/issues) for proposed features and known issues.
 

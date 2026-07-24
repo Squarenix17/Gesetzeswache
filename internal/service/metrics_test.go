@@ -88,7 +88,7 @@ func TestExportCacheLookupMetrics(t *testing.T) {
 	xmlBody := fixtures.MustRead("arbzg_snippet.xml")
 	mt.SetBytes("www.gesetze-im-internet.de", "/arbzg/xml.zip", fixtures.MustZipXML("arbzg.xml", xmlBody))
 
-	_, err := svc.ExportText(context.Background(), "ArbZG", []string{export.FormatFlat})
+	_, err := svc.ExportText(context.Background(), "ArbZG", []string{export.FormatFlat}, IncludeOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestExportCacheLookupMetrics(t *testing.T) {
 		t.Fatalf("miss=%v want >=1", miss)
 	}
 
-	_, err = svc.ExportText(context.Background(), "ArbZG", []string{export.FormatFlat})
+	_, err = svc.ExportText(context.Background(), "ArbZG", []string{export.FormatFlat}, IncludeOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}

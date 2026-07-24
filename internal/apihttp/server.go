@@ -92,7 +92,7 @@ func (s *Server) resolve(w http.ResponseWriter, r *http.Request) {
 		}
 		q = body.Query
 	}
-	res, err := s.Svc.Resolve(r.Context(), q)
+	res, err := s.Svc.Resolve(r.Context(), q, service.MergeInclude(r.URL.Query()["include"]))
 	if err != nil {
 		s.write(w, 503, res, err.Error())
 		return
@@ -105,7 +105,7 @@ func (s *Server) freshness(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		id = r.URL.Query().Get("q")
 	}
-	meta, err := s.Svc.Freshness(r.Context(), id)
+	meta, err := s.Svc.Freshness(r.Context(), id, service.MergeInclude(r.URL.Query()["include"]))
 	if err != nil {
 		s.write(w, 404, nil, err.Error())
 		return
@@ -176,7 +176,7 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 	} else {
 		fmts = formats
 	}
-	res, err := s.Svc.ExportText(r.Context(), q, fmts)
+	res, err := s.Svc.ExportText(r.Context(), q, fmts, service.MergeInclude(r.URL.Query()["include"]))
 	if err != nil {
 		s.write(w, 502, res, err.Error())
 		return

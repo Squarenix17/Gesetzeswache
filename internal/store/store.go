@@ -80,6 +80,21 @@ func (s *Store) UpsertLaws(laws []domain.Law) error {
 	})
 }
 
+// UpsertLawIfAbsent inserts law only when id is missing (atomic vs concurrent TOC sync).
+// Returns true if a new record was written.
+func (s *Store) UpsertLawIfAbsent(law domain.Law) (created bool, err error) {
+	err = s.db.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketLaws)
+		if b.Get([]byte(law.ID)) != nil {
+			created = false
+			return nil
+		}
+		created = true
+		return putJSON(b, law.ID, law)
+	})
+	return created, err
+}
+
 func (s *Store) ListLaws() ([]domain.Law, error) {
 	var out []domain.Law
 	err := s.db.View(func(tx *bbolt.Tx) error {

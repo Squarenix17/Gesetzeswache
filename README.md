@@ -226,8 +226,8 @@ docker run --rm -p 8080:8080 -v gew-data:/tmp ghcr.io/squarenix17/gesetzeswache:
 - [x] On-demand text export (hierarchical / chunked / flat)
 - [x] Docker image + GHCR publish
 - [x] Export format quality (`kind` / `section_ref` / `normtext` for RAG)
-- [ ] Integration tests with mocked GII/BGBl fixtures
-- [ ] Bulk Stand refresh for full catalog
+- [x] Integration tests with mocked GII/BGBl fixtures
+- [x] Bulk Stand refresh for full catalog
 - [ ] Metrics / observability endpoints
 
 See the [open issues](https://github.com/Squarenix17/gesetzeswache/issues) for proposed features and known issues.

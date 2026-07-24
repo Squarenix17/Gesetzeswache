@@ -66,10 +66,25 @@ type LinkedInstrument struct {
 	SectionHint   string `json:"section_hint,omitempty"`
 	Status        string `json:"status,omitempty"`   // past|current|future
 	Coverage      string `json:"coverage,omitempty"` // "section" default
+	Source        string `json:"source,omitempty"`      // seeded | discovered
+	Confidence    string `json:"confidence,omitempty"`  // high | medium | low
+	EdgeType      string `json:"edge_type,omitempty"`   // ermaechtigung | bgbl_plus_plus
 	// Pointer fields (filled when include=linked):
 	ResolveOK bool   `json:"resolve_ok,omitempty"`
 	GIIURL    string `json:"gii_url,omitempty"`
 	LawID     string `json:"law_id,omitempty"`
+}
+
+// DiscoveredEdge is a persisted parent→child instrument link from discovery.
+type DiscoveredEdge struct {
+	ParentLawID   string `json:"parent_law_id"`
+	GIISlug       string `json:"gii_slug"`
+	SectionHint   string `json:"section_hint,omitempty"`
+	Notes         string `json:"notes,omitempty"`
+	EdgeType      string `json:"edge_type"`
+	Confidence    string `json:"confidence"`
+	EffectiveFrom string `json:"effective_from,omitempty"`
+	ChildLawID    string `json:"child_law_id,omitempty"`
 }
 
 // StandCitation is the GII "Stand" signal, raw and parsed.

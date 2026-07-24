@@ -32,6 +32,7 @@ type Config struct {
 	SharedSecret       string // optional; empty = disabled
 	VariantsPath       string
 	RefuseExportStale  bool
+	StandRefreshMax    int // max laws missing Stand to refresh at InitialSync (0 = skip bulk)
 }
 
 func Load() (Config, error) {
@@ -59,6 +60,7 @@ func Load() (Config, error) {
 		SharedSecret:     os.Getenv("GEW_SHARED_SECRET"),
 		VariantsPath:     env("GEW_VARIANTS_PATH", "variants/variants.tsv"),
 		RefuseExportStale: envBool("GEW_REFUSE_EXPORT_STALE", false),
+		StandRefreshMax:   envInt("GEW_STAND_REFRESH_MAX", 10),
 	}
 	if c.MatchThreshold <= 0 || c.MatchThreshold > 1 {
 		return c, fmt.Errorf("invalid match threshold")

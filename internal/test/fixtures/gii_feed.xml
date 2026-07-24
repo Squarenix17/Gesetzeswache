@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<title>GII Aktualitätendienst</title>
+<link>http://www.gesetze-im-internet.de/aktuall</link>
+<description>Aktualitätendienst Gesetze im Internet</description>
+<item>
+<title>Änderung des Arbeitszeitgesetzes (ArbZG) – BGBl. I 2022 Nr. 1170</title>
+<link>http://www.gesetze-im-internet.de/aktuall/arbzg.html</link>
+<description>Neufassung des Arbeitszeitgesetzes (ArbZG), veröffentlicht im BGBl. I 2022 Nr. 1170.</description>
+<guid isPermaLink="false">gii-2022-1170-arbzg</guid>
+<pubDate>Thu, 21 Jul 2022 00:00:00 +0200</pubDate>
+</item>
+</channel>
+</rss>

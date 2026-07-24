@@ -2,11 +2,11 @@
 <br />
 <div align="center">
 
-  <h3 align="center">Gesetzeswache</h3>
-  <p align="center"><strong><code>gew</code></strong>  the CLI and container binary</p>
+  <h1 align="center">Gesetzeswache</h1>
+  <h3 align="center"><strong><code>gew</code></strong> the CLI and container binary</h3>
 
   <p align="center">
-    BGBl-verified German federal statute resolution for any integrator.
+    Bundesgesetzblatt-verified German federal statute resolution for any integrator.
     <br />
     REST API · CLI · MCP (stdio) · optional on-demand text export.
     <br />

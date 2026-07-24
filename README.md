@@ -81,6 +81,8 @@ Any client: RAG pipeline, search index, agent tool, or application, must treat f
 3. **Quarantine or flag for manual review** when state is `confirmed_stale` or `uncertain`
 4. **Never index or serve law text while ignoring freshness metadata**
 
+BGBl issue identity is always the triple `(teil, year, number)`, never compare issue number alone.
+
 | State | Meaning | Consumer action |
 |-------|---------|-----------------|
 | `confirmed_current` | Verified current against BGBl/GII signals | Safe to treat as current |
@@ -89,7 +91,9 @@ Any client: RAG pipeline, search index, agent tool, or application, must treat f
 
 Optional: set `GEW_REFUSE_EXPORT_STALE=true` so the server rejects export for `confirmed_stale` laws.
 
-Amendment-by-reference parents (e.g. MiLoG) expose `freshness.linked_instruments`: **section-scoped** ordinances with Inkrafttreten (`effective_from`), `section_hint`, and `status` (`current`/`future` by default; superseded `past` only with `include=past`). They are not full-law replacements — export the child slug (e.g. `milov5`) for operative § text.
+Amendment-by-reference parents (e.g. MiLoG, SGB XI § 55) expose `freshness.linked_instruments`: **section-scoped** ordinances with Inkrafttreten (`effective_from`), `section_hint`, and `status` (`current`/`future` by default; superseded `past` only with `include=past`). They are not full-law replacements — export the child slug (e.g. `milov5`, `pbav_2025`) for operative § text.
+
+**Automatic discovery (Phase 4.8):** when a Verordnung is ingested (GII feed / TOC / capped discovery / export), its Ermächtigung is parsed and high-confidence parent→child links are stored automatically (`source=discovered`). Manual [`variants/linked_instruments.tsv`](variants/linked_instruments.tsv) remains an **override** (wins on collision), not the primary update channel. Config: `GEW_DISCOVERY_ENABLED` (default true), `GEW_DISCOVERY_MAX_PER_CYCLE` (default 50).
 
 ### REST
 
@@ -200,6 +204,8 @@ All settings use the `GEW_` environment prefix. Essential variables:
 | `GEW_VARIANTS_PATH` | `variants/variants.tsv` | TSV of informal names → law IDs |
 | `GEW_ENABLE_EXPORT` | `true` | Enable on-demand text export |
 | `GEW_REFUSE_EXPORT_STALE` | `false` | When `true`, refuse export if law is `confirmed_stale` |
+| `GEW_DISCOVERY_ENABLED` | `true` | Auto-discover parent→Verordnung links from Ermächtigung |
+| `GEW_DISCOVERY_MAX_PER_CYCLE` | `50` | Max Verordnungen to ingest per discovery pass |
 
 Additional sync intervals, source URLs, and tuning knobs: [`internal/config/config.go`](internal/config/config.go).
 

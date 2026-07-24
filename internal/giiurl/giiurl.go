@@ -8,11 +8,13 @@ import (
 	"strings"
 )
 
+const MaxSlugLen = 128
+
 var slugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 // ValidSlug returns true if slug is a single safe path segment.
 func ValidSlug(slug string) bool {
-	return slug != "" && slugRe.MatchString(slug) && !strings.Contains(slug, "..")
+	return slug != "" && len(slug) <= MaxSlugLen && slugRe.MatchString(slug) && !strings.Contains(slug, "..")
 }
 
 // XMLZip builds https://{host}/{slug}/xml.zip from configured GII base.

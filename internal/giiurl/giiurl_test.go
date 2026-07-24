@@ -1,10 +1,19 @@
 package giiurl
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestValidSlug(t *testing.T) {
 	if !ValidSlug("bgb") || ValidSlug("../etc") || ValidSlug("a/b") {
 		t.Fatal("slug validation")
+	}
+	if ValidSlug(strings.Repeat("a", MaxSlugLen+1)) {
+		t.Fatal("expected overlong slug to be rejected")
+	}
+	if !ValidSlug(strings.Repeat("a", MaxSlugLen)) {
+		t.Fatal("expected max-length slug to be accepted")
 	}
 }
 

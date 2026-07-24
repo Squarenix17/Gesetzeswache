@@ -114,10 +114,12 @@ func handle(ctx context.Context, svc *service.Service, req rpcReq) rpcResp {
 func tools() []map[string]any {
 	return []map[string]any{
 		tool("resolve_law", "Resolve a German federal law by abbreviation/title and attach BGBl freshness", map[string]any{
-			"query": map[string]any{"type": "string"},
+			"query":   map[string]any{"type": "string"},
+			"include": map[string]any{"type": "string", "description": "Comma-separated: past, linked"},
 		}, []string{"query"}),
 		tool("law_freshness", "Freshness status for a known law id or abbreviation", map[string]any{
-			"id": map[string]any{"type": "string"},
+			"id":      map[string]any{"type": "string"},
+			"include": map[string]any{"type": "string", "description": "Comma-separated: past, linked"},
 		}, []string{"id"}),
 		tool("list_stale_laws", "List laws currently confirmed_stale", map[string]any{}, nil),
 		tool("force_recheck", "Force out-of-band re-verification", map[string]any{
@@ -127,6 +129,7 @@ func tools() []map[string]any {
 		tool("export_law_text", "Export law text in RAG-ready formats (hierarchical|chunked|flat|normtext)", map[string]any{
 			"query":   map[string]any{"type": "string"},
 			"formats": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"include": map[string]any{"type": "string", "description": "Comma-separated: past, linked"},
 		}, []string{"query"}),
 	}
 }
@@ -144,11 +147,12 @@ func tool(name, desc string, props map[string]any, required []string) map[string
 }
 
 func callTool(ctx context.Context, svc *service.Service, name string, args map[string]any) (any, error) {
+	opts := service.ParseInclude(str(args["include"]))
 	switch name {
 	case "resolve_law":
-		return svc.Resolve(ctx, str(args["query"]))
+		return svc.Resolve(ctx, str(args["query"]), opts)
 	case "law_freshness":
-		return svc.Freshness(ctx, str(args["id"]))
+		return svc.Freshness(ctx, str(args["id"]), opts)
 	case "list_stale_laws":
 		return svc.ListStale(ctx)
 	case "force_recheck":
@@ -172,7 +176,7 @@ func callTool(ctx context.Context, svc *service.Service, name string, args map[s
 				}
 			}
 		}
-		return svc.ExportText(ctx, str(args["query"]), formats)
+		return svc.ExportText(ctx, str(args["query"]), formats, opts)
 	default:
 		return nil, fmt.Errorf("unknown tool %s", name)
 	}

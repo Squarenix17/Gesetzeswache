@@ -18,18 +18,20 @@ func Run(ctx context.Context, svc *service.Service, args []string) int {
 	}
 	switch args[0] {
 	case "resolve":
-		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: resolve <query>")
+		opts, rest := peelIncludeFlags(args[1:])
+		if len(rest) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: resolve [--include=past,linked] <query>")
 			return 2
 		}
-		res, err := svc.Resolve(ctx, strings.Join(args[1:], " "))
+		res, err := svc.Resolve(ctx, strings.Join(rest, " "), opts)
 		return printJSON(res, err)
 	case "freshness":
-		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: freshness <id-or-abbr>")
+		opts, rest := peelIncludeFlags(args[1:])
+		if len(rest) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: freshness [--include=past,linked] <id-or-abbr>")
 			return 2
 		}
-		res, err := svc.Freshness(ctx, args[1])
+		res, err := svc.Freshness(ctx, rest[0], opts)
 		return printJSON(res, err)
 	case "stale":
 		res, err := svc.ListStale(ctx)
@@ -45,21 +47,40 @@ func Run(ctx context.Context, svc *service.Service, args []string) int {
 		res, err := svc.SyncStatus(ctx)
 		return printJSON(res, err)
 	case "export":
-		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: export <query> [formats: hierarchical|chunked|flat|normtext]")
+		opts, rest := peelIncludeFlags(args[1:])
+		if len(rest) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: export [--include=past,linked] <query> [formats: hierarchical|chunked|flat|normtext]")
 			return 2
 		}
 		var formats []string
-		q := args[1]
-		if len(args) > 2 {
-			formats = strings.Split(args[2], ",")
+		q := rest[0]
+		if len(rest) > 1 {
+			formats = strings.Split(rest[1], ",")
 		}
-		res, err := svc.ExportText(ctx, q, formats)
+		res, err := svc.ExportText(ctx, q, formats, opts)
 		return printJSON(res, err)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", args[0])
 		return 2
 	}
+}
+
+func peelIncludeFlags(args []string) (service.IncludeOpts, []string) {
+	var opts service.IncludeOpts
+	var rest []string
+	for _, a := range args {
+		if strings.HasPrefix(a, "--include=") {
+			part := service.ParseInclude(strings.TrimPrefix(a, "--include="))
+			opts.Past = opts.Past || part.Past
+			opts.Linked = opts.Linked || part.Linked
+			continue
+		}
+		if a == "--include" {
+			continue
+		}
+		rest = append(rest, a)
+	}
+	return opts, rest
 }
 
 func printJSON(v any, err error) int {

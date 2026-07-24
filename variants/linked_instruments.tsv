@@ -1,4 +1,4 @@
-# parent_law_id	kind	gii_slug	notes
+# parent_law_id	kind	gii_slug	notes	effective_from	section_hint
 # Amendment-by-reference: parent Gesetz rates/values set by separate Verordnungen on GII.
-milog	verordnung	milov4	Vierte Mindestlohnanpassungsverordnung (BGBl 2023 I Nr. 321)
-milog	verordnung	milov5	Fünfte Mindestlohnanpassungsverordnung (BGBl 2025 I Nr. 268)
+milog	verordnung	milov4	Vierte Mindestlohnanpassungsverordnung (BGBl 2023 I Nr. 321)	2024-01-01	§ 1
+milog	verordnung	milov5	Fünfte Mindestlohnanpassungsverordnung (BGBl 2025 I Nr. 268)	2026-01-01	§ 1

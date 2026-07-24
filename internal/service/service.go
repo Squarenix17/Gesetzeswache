@@ -78,7 +78,7 @@ type ResolveResult struct {
 	Threshold   float64        `json:"threshold"`
 }
 
-func (s *Service) Resolve(ctx context.Context, query string) (ResolveResult, error) {
+func (s *Service) Resolve(ctx context.Context, query string, opts IncludeOpts) (ResolveResult, error) {
 	_ = ctx
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -96,10 +96,22 @@ func (s *Service) Resolve(ctx context.Context, query string) (ResolveResult, err
 		})
 	}
 	if best == nil {
+		// Direct id / seeded slug lookup (stubs may exist before search ranking knows them).
+		if law, ok, _ := s.Store.GetLaw(normalize.Key(query)); ok {
+			meta, err := s.freshnessFor(law.ID, opts)
+			if err != nil {
+				return out, err
+			}
+			out.Matched = true
+			out.Law = &law
+			out.Score = 1
+			out.Freshness = &meta
+			return out, nil
+		}
 		out.Matched = false
 		return out, nil
 	}
-	meta, err := s.freshnessFor(best.Law.ID)
+	meta, err := s.freshnessFor(best.Law.ID, opts)
 	if err != nil {
 		return out, err
 	}
@@ -116,7 +128,7 @@ func mustLaws(s *Service) []domain.Law {
 	return laws
 }
 
-func (s *Service) Freshness(ctx context.Context, lawID string) (FreshnessMeta, error) {
+func (s *Service) Freshness(ctx context.Context, lawID string, opts IncludeOpts) (FreshnessMeta, error) {
 	_ = ctx
 	lawID = strings.TrimSpace(lawID)
 	if lawID == "" {
@@ -128,10 +140,10 @@ func (s *Service) Freshness(ctx context.Context, lawID string) (FreshnessMeta, e
 			lawID = best.Law.ID
 		}
 	}
-	return s.freshnessFor(lawID)
+	return s.freshnessFor(lawID, opts)
 }
 
-func (s *Service) freshnessFor(lawID string) (FreshnessMeta, error) {
+func (s *Service) freshnessFor(lawID string, opts IncludeOpts) (FreshnessMeta, error) {
 	law, ok, err := s.Store.GetLaw(lawID)
 	if err != nil {
 		return FreshnessMeta{}, err
@@ -164,7 +176,20 @@ func (s *Service) freshnessFor(lawID string) (FreshnessMeta, error) {
 		probeOnly = true
 	}
 	instrRefs, instrIssues := instruments.CollectEvidence(s.Store, s.Instruments, lawID, stand)
-	seeded := s.seededInstruments(lawID)
+	now := time.Now().UTC()
+	// Ensure seeded children exist for recheck/export; evidence still uses full seed notes.
+	if n, err := instruments.EnsureSeededChildren(s.Store, s.Instruments, s.CFG.GIIBase, lawID); err != nil {
+		if s.Log != nil {
+			s.Log.Warn("ensure seeded children", "law", lawID, "err", err)
+		}
+	} else if n > 0 {
+		s.refreshSearchIndex()
+	}
+	seeded := instruments.AnnotateChain(s.seededInstruments(lawID), now)
+	linked := instruments.FilterLinkedForResponse(seeded, opts.Past)
+	if opts.Linked {
+		linked = s.attachLinkedPointers(linked)
+	}
 	rec := freshness.Evaluate(freshness.Input{
 		LawID:              lawID,
 		Stand:              stand,
@@ -176,7 +201,7 @@ func (s *Service) freshnessFor(lawID string) (FreshnessMeta, error) {
 		LastGIIFeedSuccess: giiT,
 		LastBGBlSuccess:    bgbl,
 		BGBlFromProbeOnly:  probeOnly,
-		Now:                time.Now().UTC(),
+		Now:                now,
 		MaxAge:             s.CFG.FreshnessMaxAge,
 	})
 	_ = s.Store.PutFreshness(rec)
@@ -190,7 +215,7 @@ func (s *Service) freshnessFor(lawID string) (FreshnessMeta, error) {
 		Stand:             &stand,
 		GIIURL:            law.GIIURL,
 		BGBlPointers:      pointers,
-		LinkedInstruments: seeded,
+		LinkedInstruments: linked,
 		InstrumentRefs:    instrRefs,
 	}
 	if !tocT.IsZero() {
@@ -204,6 +229,35 @@ func (s *Service) freshnessFor(lawID string) (FreshnessMeta, error) {
 
 func (s *Service) seededInstruments(lawID string) []domain.LinkedInstrument {
 	return instruments.ForParentSafe(s.Instruments, lawID)
+}
+
+func (s *Service) refreshSearchIndex() {
+	if s.Search == nil || s.Store == nil {
+		return
+	}
+	laws, _ := s.Store.ListLaws()
+	variants, _ := s.Store.ListVariants()
+	s.Search.Swap(laws, variants)
+}
+
+func (s *Service) attachLinkedPointers(rows []domain.LinkedInstrument) []domain.LinkedInstrument {
+	out := make([]domain.LinkedInstrument, len(rows))
+	copy(out, rows)
+	for i := range out {
+		slug := out[i].GIISlug
+		law, neu, err := instruments.EnsureLawFromSlug(s.Store, s.CFG.GIIBase, slug)
+		if err != nil {
+			out[i].ResolveOK = false
+			continue
+		}
+		if neu {
+			s.refreshSearchIndex()
+		}
+		out[i].LawID = law.ID
+		out[i].GIIURL = law.GIIURL
+		out[i].ResolveOK = true
+	}
+	return out
 }
 
 // PersistEditorialInstruments stores +++ citation blob + fingerprint after export IR build.
@@ -239,11 +293,19 @@ func (s *Service) ForceRecheck(ctx context.Context, lawID string) error {
 		if law, ok, _ := s.Store.GetLaw(lawID); ok {
 			_ = s.Sync.RefreshStandForLaw(ctx, law)
 			s.Export.InvalidateLaw(law.ID)
-			// Also refresh seeded linked ordinance Stands (MiLoV4/MiLoV5, …).
+			// Ensure + refresh all seeded children (including past) for evidence.
+			if n, err := instruments.EnsureSeededChildren(s.Store, s.Instruments, s.CFG.GIIBase, lawID); err != nil {
+				if s.Log != nil {
+					s.Log.Warn("ensure seeded children on recheck", "law", lawID, "err", err)
+				}
+			} else if n > 0 {
+				s.refreshSearchIndex()
+			}
 			for _, li := range s.seededInstruments(lawID) {
 				childID := normalize.Key(li.GIISlug)
 				if child, ok, _ := s.Store.GetLaw(childID); ok {
 					_ = s.Sync.RefreshStandForLaw(ctx, child)
+					s.Export.InvalidateLaw(child.ID)
 				}
 			}
 		}
@@ -341,7 +403,7 @@ type ExportResult struct {
 	UnitIDs             []string          `json:"unit_ids,omitempty"`
 }
 
-func (s *Service) ExportText(ctx context.Context, queryOrID string, formats []string) (ExportResult, error) {
+func (s *Service) ExportText(ctx context.Context, queryOrID string, formats []string, opts IncludeOpts) (ExportResult, error) {
 	if !s.CFG.EnableExport {
 		return ExportResult{}, fmt.Errorf("export disabled")
 	}
@@ -358,25 +420,26 @@ func (s *Service) ExportText(ctx context.Context, queryOrID string, formats []st
 			return ExportResult{}, fmt.Errorf("unknown format %q", f)
 		}
 	}
-	res, err := s.Resolve(ctx, queryOrID)
+	res, err := s.Resolve(ctx, queryOrID, opts)
 	if err != nil {
 		// try direct id
-		if law, ok, _ := s.Store.GetLaw(queryOrID); ok {
-			meta, err2 := s.freshnessFor(law.ID)
+		key := normalize.Key(queryOrID)
+		if law, ok, _ := s.Store.GetLaw(key); ok {
+			meta, err2 := s.freshnessFor(law.ID, opts)
 			if err2 != nil {
 				return ExportResult{}, err2
 			}
-			return s.exportLaw(ctx, law, meta, formats)
+			return s.exportLaw(ctx, law, meta, formats, opts)
 		}
 		return ExportResult{}, err
 	}
 	if !res.Matched || res.Law == nil {
 		return ExportResult{Matched: false, Suggestions: res.Suggestions}, nil
 	}
-	return s.exportLaw(ctx, *res.Law, *res.Freshness, formats)
+	return s.exportLaw(ctx, *res.Law, *res.Freshness, formats, opts)
 }
 
-func (s *Service) exportLaw(ctx context.Context, law domain.Law, meta FreshnessMeta, formats []string) (ExportResult, error) {
+func (s *Service) exportLaw(ctx context.Context, law domain.Law, meta FreshnessMeta, formats []string, opts IncludeOpts) (ExportResult, error) {
 	stand := domain.StandCitation{}
 	if meta.Stand != nil {
 		stand = *meta.Stand
@@ -404,7 +467,7 @@ func (s *Service) exportLaw(ctx context.Context, law domain.Law, meta FreshnessM
 			if raw := export.ExtractStandRaw(xmlData); raw != "" {
 				parsed := citation.Parse(law.ID, raw)
 				_ = s.Store.UpsertStand(parsed)
-				newMeta, err := s.freshnessFor(law.ID)
+				newMeta, err := s.freshnessFor(law.ID, opts)
 				if err != nil {
 					return ExportResult{}, err
 				}
@@ -440,7 +503,7 @@ func (s *Service) exportLaw(ctx context.Context, law domain.Law, meta FreshnessM
 		s.Export.Put(ir)
 	}
 	s.PersistEditorialInstruments(law.ID, ir)
-	if newMeta, err := s.freshnessFor(law.ID); err == nil {
+	if newMeta, err := s.freshnessFor(law.ID, opts); err == nil {
 		meta = newMeta
 		if meta.Stand != nil {
 			stand = *meta.Stand

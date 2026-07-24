@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Squarenix17/gesetzeswache/internal/citation"
 	"github.com/Squarenix17/gesetzeswache/internal/domain"
+	"github.com/Squarenix17/gesetzeswache/internal/giiurl"
 	"github.com/Squarenix17/gesetzeswache/internal/normalize"
 )
 
@@ -47,9 +49,24 @@ func LoadTSV(path string) (*Catalog, error) {
 			Kind:        strings.TrimSpace(parts[1]),
 			GIISlug:     strings.TrimSpace(parts[2]),
 		}
+		if !giiurl.ValidSlug(li.GIISlug) {
+			return nil, fmt.Errorf("%s:%d: invalid gii_slug %q", path, lineNo, li.GIISlug)
+		}
 		if len(parts) >= 4 {
 			li.Notes = strings.TrimSpace(parts[3])
 		}
+		if len(parts) >= 5 {
+			li.EffectiveFrom = strings.TrimSpace(parts[4])
+			if li.EffectiveFrom != "" {
+				if _, err := time.Parse("2006-01-02", li.EffectiveFrom); err != nil {
+					return nil, fmt.Errorf("%s:%d: invalid effective_from %q (want YYYY-MM-DD)", path, lineNo, li.EffectiveFrom)
+				}
+			}
+		}
+		if len(parts) >= 6 {
+			li.SectionHint = strings.TrimSpace(parts[5])
+		}
+		li.Coverage = CoverageSection
 		if li.ParentLawID == "" || li.GIISlug == "" {
 			continue
 		}

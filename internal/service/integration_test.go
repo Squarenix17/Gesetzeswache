@@ -94,7 +94,7 @@ func seedCatalog(t *testing.T, svc *Service, mt *httpmock.Transport) {
 func TestIntegration_CatalogNotReady(t *testing.T) {
 	mt := httpmock.New()
 	svc := newTestService(t, mt)
-	_, err := svc.Resolve(context.Background(), "ArbZG")
+	_, err := svc.Resolve(context.Background(), "ArbZG", IncludeOpts{})
 	if err == nil || err.Error() != "catalog not ready" {
 		t.Fatalf("want catalog not ready, got %v", err)
 	}
@@ -159,7 +159,7 @@ func TestIntegration_ExportNormtext(t *testing.T) {
 	xmlBody := fixtures.MustRead("arbzg_snippet.xml")
 	mt.SetBytes("www.gesetze-im-internet.de", "/arbzg/xml.zip", fixtures.MustZipXML("arbzg.xml", xmlBody))
 
-	res, err := svc.ExportText(context.Background(), "ArbZG", []string{export.FormatNormtext})
+	res, err := svc.ExportText(context.Background(), "ArbZG", []string{export.FormatNormtext}, IncludeOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestIntegration_ExportMalformedXML(t *testing.T) {
 	bad := fixtures.MustRead("malformed.xml")
 	mt.SetBytes("www.gesetze-im-internet.de", "/arbzg/xml.zip", fixtures.MustZipXML("bad.xml", bad))
 
-	_, err := svc.ExportText(context.Background(), "ArbZG", []string{export.FormatNormtext})
+	_, err := svc.ExportText(context.Background(), "ArbZG", []string{export.FormatNormtext}, IncludeOpts{})
 	if err == nil {
 		t.Fatal("expected malformed XML error")
 	}
@@ -238,7 +238,7 @@ func TestIntegration_MiLoG_seedNotes_withoutExport_notConfirmedCurrent(t *testin
 		t.Fatal(err)
 	}
 
-	meta, err := svc.Freshness(context.Background(), "milog")
+	meta, err := svc.Freshness(context.Background(), "milog", IncludeOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestIntegration_MiLoG_plusPlusVerordnung_notConfirmedCurrent(t *testing.T) 
 	xmlBody := fixtures.MustRead("milog_snippet.xml")
 	mt.SetBytes("www.gesetze-im-internet.de", "/milog/xml.zip", fixtures.MustZipXML("milog.xml", xmlBody))
 
-	res, err := svc.ExportText(context.Background(), "milog", []string{export.FormatNormtext})
+	res, err := svc.ExportText(context.Background(), "milog", []string{export.FormatNormtext}, IncludeOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,6 +326,96 @@ func TestIntegration_MiLoG_plusPlusVerordnung_notConfirmedCurrent(t *testing.T) 
 	}
 	if !strings.Contains(body, "12 Euro") {
 		t.Fatalf("expected unchanged MiLoG body with 12 Euro, got %q", body)
+	}
+}
+
+func TestIntegration_MiLoG_linkedChain_currentOnlyByDefault(t *testing.T) {
+	// Mid-2026 clock (real Now in this repo's test date) → milov5 current; milov4 past omitted unless include=past.
+	mt := httpmock.New()
+	svc := newTestService(t, mt)
+	seedCatalog(t, svc, mt)
+
+	cat, err := instruments.LoadTSV(filepath.Join("..", "..", "variants", "linked_instruments.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.Instruments = cat
+
+	law := domain.Law{
+		ID: "milog", Abbreviation: "MiLoG", Title: "Mindestlohngesetz",
+		GIIPath: "milog", GIIURL: "https://www.gesetze-im-internet.de/milog/",
+	}
+	if err := svc.Store.UpsertLaws([]domain.Law{law}); err != nil {
+		t.Fatal(err)
+	}
+	laws, _ := svc.Store.ListLaws()
+	variants, _ := svc.Store.ListVariants()
+	svc.Search.Swap(laws, variants)
+
+	now := time.Now().UTC()
+	_ = svc.Store.SetMetaTime("last_toc_success", now)
+	_ = svc.Store.SetMetaTime("last_bgbl_feed_success", now)
+	stand := citation.Parse("milog", "Zuletzt geändert durch Art. 8 Abs. 3 G v. 12.5.2026 I Nr. 137")
+	if err := svc.Store.UpsertStand(stand); err != nil {
+		t.Fatal(err)
+	}
+	_ = svc.Store.UpsertIssue(domain.GazetteIssue{
+		ID: citation.IssueID(1, 2025, "268"), Teil: 1, Year: 2025, Number: "268",
+		Title: "Fünfte Mindestlohnanpassungsverordnung",
+	})
+
+	meta, err := svc.Freshness(context.Background(), "milog", IncludeOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(meta.LinkedInstruments) != 1 || meta.LinkedInstruments[0].GIISlug != "milov5" {
+		t.Fatalf("default want [milov5], got %+v", meta.LinkedInstruments)
+	}
+	if meta.LinkedInstruments[0].Status != instruments.StatusCurrent {
+		t.Fatalf("status=%s want current", meta.LinkedInstruments[0].Status)
+	}
+	if meta.LinkedInstruments[0].SectionHint != "§ 1" {
+		t.Fatalf("section_hint=%q", meta.LinkedInstruments[0].SectionHint)
+	}
+	if meta.LinkedInstruments[0].Coverage != instruments.CoverageSection {
+		t.Fatalf("coverage=%q", meta.LinkedInstruments[0].Coverage)
+	}
+	// Fail-safe still sees seed citations for both ordinances.
+	if meta.State == domain.FreshnessConfirmedCurrent {
+		t.Fatalf("must not be confirmed_current; state=%s", meta.State)
+	}
+
+	withPast, err := svc.Freshness(context.Background(), "milog", IncludeOpts{Past: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(withPast.LinkedInstruments) != 2 {
+		t.Fatalf("include=past want 2, got %+v", withPast.LinkedInstruments)
+	}
+	slugs := map[string]string{}
+	for _, li := range withPast.LinkedInstruments {
+		slugs[li.GIISlug] = li.Status
+	}
+	if slugs["milov4"] != instruments.StatusPast || slugs["milov5"] != instruments.StatusCurrent {
+		t.Fatalf("statuses=%v", slugs)
+	}
+
+	linked, err := svc.Freshness(context.Background(), "milog", IncludeOpts{Linked: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(linked.LinkedInstruments) != 1 {
+		t.Fatalf("linked default len=%d", len(linked.LinkedInstruments))
+	}
+	li := linked.LinkedInstruments[0]
+	if !li.ResolveOK || li.LawID != "milov5" || li.GIIURL == "" {
+		t.Fatalf("pointers %+v", li)
+	}
+	if _, ok, _ := svc.Store.GetLaw("milov5"); !ok {
+		t.Fatal("expected milov5 stub in catalog")
+	}
+	if _, ok, _ := svc.Store.GetLaw("milov4"); !ok {
+		t.Fatal("ensure should create past child stubs too")
 	}
 }
 

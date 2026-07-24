@@ -58,10 +58,18 @@ type InstrumentRef struct {
 
 // LinkedInstrument maps a parent law to a related ordinance/instrument (seeded TSV).
 type LinkedInstrument struct {
-	ParentLawID string `json:"parent_law_id"`
-	Kind        string `json:"kind"` // verordnung|gesetz|…
-	GIISlug     string `json:"gii_slug"`
-	Notes       string `json:"notes,omitempty"`
+	ParentLawID   string `json:"parent_law_id"`
+	Kind          string `json:"kind"` // verordnung|gesetz|…
+	GIISlug       string `json:"gii_slug"`
+	Notes         string `json:"notes,omitempty"`
+	EffectiveFrom string `json:"effective_from,omitempty"` // YYYY-MM-DD Inkrafttreten
+	SectionHint   string `json:"section_hint,omitempty"`
+	Status        string `json:"status,omitempty"`   // past|current|future
+	Coverage      string `json:"coverage,omitempty"` // "section" default
+	// Pointer fields (filled when include=linked):
+	ResolveOK bool   `json:"resolve_ok,omitempty"`
+	GIIURL    string `json:"gii_url,omitempty"`
+	LawID     string `json:"law_id,omitempty"`
 }
 
 // StandCitation is the GII "Stand" signal, raw and parsed.

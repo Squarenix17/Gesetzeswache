@@ -16,6 +16,7 @@ import (
 
 	"github.com/Squarenix17/gesetzeswache/internal/citation"
 	"github.com/Squarenix17/gesetzeswache/internal/config"
+	"github.com/Squarenix17/gesetzeswache/internal/discovery"
 	"github.com/Squarenix17/gesetzeswache/internal/domain"
 	"github.com/Squarenix17/gesetzeswache/internal/export"
 	"github.com/Squarenix17/gesetzeswache/internal/freshness"
@@ -215,6 +216,9 @@ func (o *Orchestrator) RunGIIFeed(ctx context.Context) error {
 			})
 			iss.Matched = true
 			_ = o.Store.UpsertIssue(iss)
+			if law, ok, _ := o.Store.GetLaw(lawID); ok && discovery.LooksLikeVerordnung(law) {
+				_ = o.Store.SetMeta("discovery_queue:"+law.ID, "1")
+			}
 			n++
 		}
 	}
@@ -416,6 +420,12 @@ func (o *Orchestrator) Reconcile(ctx context.Context) error {
 	}
 	for _, law := range laws {
 		stand, _, _ := o.Store.GetStand(law.ID)
+		if !stand.ParseOK && strings.TrimSpace(stand.Raw) != "" {
+			if parsed := citation.Parse(law.ID, stand.Raw); parsed.ParseOK {
+				_ = o.Store.UpsertStand(parsed)
+				stand = parsed
+			}
+		}
 		links, _ := o.Store.LinksForLaw(law.ID)
 		var issues []domain.GazetteIssue
 		classes := map[string]domain.LinkClass{}
@@ -425,20 +435,32 @@ func (o *Orchestrator) Reconcile(ctx context.Context) error {
 				issues = append(issues, iss)
 			}
 		}
-		instrRefs, instrIssues := instruments.CollectEvidence(o.Store, o.Instruments, law.ID, stand)
+		seeded := instruments.ForParentSafe(o.Instruments, law.ID)
+		edges, discErr := o.Store.DiscoveredForParent(law.ID)
+		if discErr != nil && o.Log != nil {
+			o.Log.Warn("discovered links read failed", "law", law.ID, "err", discErr)
+		}
+		var disc []domain.LinkedInstrument
+		for _, e := range edges {
+			disc = append(disc, discovery.EdgeToLinked(e))
+		}
+		linked := discovery.Merge(seeded, disc)
+		instrRefs, instrIssues := instruments.CollectEvidence(o.Store, linked, law.ID, stand)
+		hasLinked := len(linked) > 0 || discErr != nil
 		rec := freshness.Evaluate(freshness.Input{
-			LawID:              law.ID,
-			Stand:              stand,
-			LinkedIssues:       issues,
-			LinkClasses:        classes,
-			InstrumentRefs:     instrRefs,
-			InstrumentIssues:   instrIssues,
-			LastTOCSuccess:     tocT,
-			LastGIIFeedSuccess: giiT,
-			LastBGBlSuccess:    bgblSuccess,
-			BGBlFromProbeOnly:  probeOnly,
-			Now:                now,
-			MaxAge:             o.CFG.FreshnessMaxAge,
+			LawID:                      law.ID,
+			Stand:                      stand,
+			LinkedIssues:               issues,
+			LinkClasses:                classes,
+			InstrumentRefs:             instrRefs,
+			InstrumentIssues:           instrIssues,
+			HasSeededLinkedInstruments: hasLinked,
+			LastTOCSuccess:             tocT,
+			LastGIIFeedSuccess:         giiT,
+			LastBGBlSuccess:            bgblSuccess,
+			BGBlFromProbeOnly:          probeOnly,
+			Now:                        now,
+			MaxAge:                     o.CFG.FreshnessMaxAge,
 		})
 		_ = o.Store.PutFreshness(rec)
 	}
@@ -522,15 +544,20 @@ func (o *Orchestrator) RefreshStandForLaw(ctx context.Context, law domain.Law) e
 		ir, err := export.BuildIR(law, "instruments", xmlData)
 		if err == nil {
 			texts := export.EditorialCitationTexts(ir)
-			refs := export.InstrumentRefsFromIR(ir)
 			if len(texts) > 0 {
 				if err := o.Store.SetMeta("editorial:"+law.ID, strings.Join(texts, "\n")); err != nil && o.Log != nil {
 					o.Log.Warn("persist editorial", "law", law.ID, "err", err)
 				}
 			}
-			if len(refs) > 0 {
-				if err := o.Store.SetMeta("editorial_fp:"+law.ID, citation.FingerprintInstruments(refs)); err != nil && o.Log != nil {
-					o.Log.Warn("persist editorial fingerprint", "law", law.ID, "err", err)
+		}
+		if o.CFG.DiscoveryEnabled {
+			lookup, lerr := o.catalogLookup()
+			if lerr != nil {
+				return lerr
+			}
+			if _, err := discovery.IngestLawXML(o.Store, lookup, law, xmlData); err != nil {
+				if o.Log != nil {
+					o.Log.Warn("discovery ingest", "law", law.ID, "err", err)
 				}
 			}
 		}
@@ -565,6 +592,65 @@ func (o *Orchestrator) RefreshMissingStands(ctx context.Context, max int) (int, 
 		}
 	}
 	return n, nil
+}
+
+// DiscoverOrdinances ingests Ermächtigung edges for Verordnung candidates up to max laws.
+func (o *Orchestrator) DiscoverOrdinances(ctx context.Context, max int) (int, error) {
+	if max <= 0 || !o.CFG.DiscoveryEnabled {
+		return 0, nil
+	}
+	laws, err := o.Store.ListLaws()
+	if err != nil {
+		return 0, err
+	}
+	candidates := o.discoveryCandidates(laws)
+	n := 0
+	for _, law := range candidates {
+		if err := ctx.Err(); err != nil {
+			return n, err
+		}
+		if n >= max {
+			break
+		}
+		if ingested, _, _ := o.Store.GetMeta("discovery_ingested:" + law.ID); ingested == "1" {
+			continue
+		}
+		if err := o.RefreshStandForLaw(ctx, law); err != nil {
+			o.Log.Warn("discovery refresh", "law", law.ID, "err", err)
+			continue
+		}
+		_ = o.Store.SetMeta("discovery_ingested:"+law.ID, "1")
+		_ = o.Store.SetMeta("discovery_queue:"+law.ID, "")
+		n++
+	}
+	return n, nil
+}
+
+func (o *Orchestrator) discoveryCandidates(laws []domain.Law) []domain.Law {
+	var queued, rest []domain.Law
+	for _, law := range laws {
+		if !discovery.LooksLikeVerordnung(law) {
+			continue
+		}
+		if v, ok, _ := o.Store.GetMeta("discovery_queue:" + law.ID); ok && v == "1" {
+			queued = append(queued, law)
+			continue
+		}
+		rest = append(rest, law)
+	}
+	return append(queued, rest...)
+}
+
+func (o *Orchestrator) catalogLookup() (discovery.CatalogLookup, error) {
+	laws, err := o.Store.ListLaws()
+	if err != nil {
+		return discovery.CatalogLookup{}, err
+	}
+	variants, err := o.Store.ListVariants()
+	if err != nil {
+		return discovery.CatalogLookup{}, err
+	}
+	return discovery.CatalogLookup{Laws: laws, Variants: variants}, nil
 }
 
 func (o *Orchestrator) fetchLawXML(ctx context.Context, law domain.Law) ([]byte, error) {
@@ -730,6 +816,13 @@ func (o *Orchestrator) InitialSync(ctx context.Context) {
 		o.Log.Warn("initial stand refresh", "err", err)
 	} else if n > 0 {
 		o.Log.Info("initial stand refresh", "filled", n, "max", o.CFG.StandRefreshMax)
+	}
+	if o.CFG.DiscoveryEnabled {
+		if n, err := o.DiscoverOrdinances(ctx, o.CFG.DiscoveryMaxPerCycle); err != nil {
+			o.Log.Warn("initial discovery", "err", err)
+		} else if n > 0 {
+			o.Log.Info("initial discovery", "ingested", n, "max", o.CFG.DiscoveryMaxPerCycle)
+		}
 	}
 	_ = o.RunGIIFeed(ctx)
 	if err := o.RunBGBlFeeds(ctx); err != nil {

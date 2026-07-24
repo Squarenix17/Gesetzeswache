@@ -52,7 +52,7 @@
 ### What it is
 
 - **Interfaces:** HTTP REST, local CLI (`gew`), MCP over stdio
-- **Optional text export:** on-demand `hierarchical`, `chunked`, or `flat` formats for RAG and indexing pipelines, no durable full-text corpus is stored
+- **Optional text export:** on-demand `hierarchical`, `chunked`, `flat`, or `normtext` formats for RAG and indexing pipelines, no durable full-text corpus is stored
 - **Env prefix:** `GEW_*` (matches the `gew` binary nickname)
 
 ### What it is not
@@ -99,7 +99,7 @@ Optional: set `GEW_REFUSE_EXPORT_STALE=true` so the server rejects export for `c
 | GET | `/v1/freshness?id=` | Freshness for a known ID (or `q=`) |
 | GET | `/v1/stale` | List `confirmed_stale` laws |
 | GET | `/v1/sync/status` | Sync and readiness status |
-| GET, POST | `/v1/export?q=&format=hierarchical\|chunked\|flat` | On-demand text export |
+| GET, POST | `/v1/export?q=&format=hierarchical\|chunked\|flat\|normtext` | On-demand text export |
 | POST | `/v1/recheck` | Force re-verification (auth required) |
 
 ```bash
@@ -128,7 +128,7 @@ Run `gew mcp` and connect your MCP client.
 | Tool | Purpose |
 |------|---------|
 | `resolve_law` | Resolve by abbreviation/title + freshness |
-| `export_law_text` | Export text (`hierarchical`, `chunked`, `flat`) |
+| `export_law_text` | Export text (`hierarchical`, `chunked`, `flat`, `normtext`) |
 | `law_freshness` | Freshness for a known law ID or abbreviation |
 | `list_stale_laws` | List laws currently `confirmed_stale` |
 | `force_recheck` | Force out-of-band re-verification |
@@ -225,6 +225,7 @@ docker run --rm -p 8080:8080 -v gew-data:/tmp ghcr.io/squarenix17/gesetzeswache:
 - [x] REST, CLI (`gew`), and MCP interfaces
 - [x] On-demand text export (hierarchical / chunked / flat)
 - [x] Docker image + GHCR publish
+- [x] Export format quality (`kind` / `section_ref` / `normtext` for RAG)
 - [ ] Integration tests with mocked GII/BGBl fixtures
 - [ ] Bulk Stand refresh for full catalog
 - [ ] Metrics / observability endpoints

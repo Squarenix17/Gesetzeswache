@@ -75,7 +75,21 @@ func LoadTSV(path string) (*Catalog, error) {
 		}
 		c.byParent[li.ParentLawID] = append(c.byParent[li.ParentLawID], li)
 	}
-	return c, sc.Err()
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	for parent, rows := range c.byParent {
+		if len(rows) < 2 {
+			continue
+		}
+		for i, li := range rows {
+			if li.EffectiveFrom == "" || li.SectionHint == "" {
+				return nil, fmt.Errorf("%s: parent %q row %d: effective_from and section_hint required for multi-row parents",
+					path, parent, i+1)
+			}
+		}
+	}
+	return c, nil
 }
 
 // ForParent returns seeded instruments for a law id (normalized key).

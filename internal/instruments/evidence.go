@@ -15,17 +15,20 @@ type MetaStandIssueStore interface {
 	GetIssue(id string) (domain.GazetteIssue, bool, error)
 }
 
-// CollectEvidence gathers Stand / editorial / seeded citation refs and matching store issues.
+// CollectEvidence gathers Stand / editorial / linked-instrument citation refs and matching store issues.
 // Issue lookup uses canonical citation.IssueID only (no full-catalog scan).
-func CollectEvidence(st MetaStandIssueStore, cat *Catalog, lawID string, stand domain.StandCitation) ([]domain.InstrumentRef, []domain.GazetteIssue) {
+func CollectEvidence(st MetaStandIssueStore, linked []domain.LinkedInstrument, lawID string, stand domain.StandCitation) ([]domain.InstrumentRef, []domain.GazetteIssue) {
 	var refs []domain.InstrumentRef
 	refs = append(refs, citation.ParseLinkedInstruments(stand.Raw)...)
 	if blob, ok, _ := st.GetMeta("editorial:" + lawID); ok && blob != "" {
 		refs = append(refs, citation.ParseLinkedInstruments(blob)...)
 	}
-	for _, li := range ForParentSafe(cat, lawID) {
+	for _, li := range linked {
 		refs = append(refs, citation.ParseLinkedInstruments(li.Notes)...)
-		childID := normalize.Key(li.GIISlug)
+		childID := normalize.Key(li.LawID)
+		if childID == "" {
+			childID = normalize.Key(li.GIISlug)
+		}
 		if childStand, ok, _ := st.GetStand(childID); ok {
 			refs = append(refs, citation.ParseLinkedInstruments(childStand.Raw)...)
 		}

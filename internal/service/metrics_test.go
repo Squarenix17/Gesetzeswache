@@ -76,6 +76,30 @@ func TestCollectMetrics_freshnessLaws(t *testing.T) {
 	}
 }
 
+func TestCollectMetrics_freshnessGaugesClearedOnStoreError(t *testing.T) {
+	mt := httpmock.New()
+	reg := metrics.NewRegistry()
+	svc := newTestService(t, mt)
+	svc.Metrics = reg
+
+	_ = svc.Store.PutFreshness(domain.FreshnessRecord{
+		LawID: "x", State: domain.FreshnessConfirmedStale, EvaluatedAt: time.Now().UTC(),
+	})
+	svc.CollectMetrics(reg)
+	if reg.GaugeValue(metrics.MetricFreshnessLaws, map[string]string{"state": "confirmed_stale"}) != 1 {
+		t.Fatal("setup: expected stale=1")
+	}
+
+	_ = svc.Store.Close()
+	svc.CollectMetrics(reg)
+	if reg.GaugeValue(metrics.MetricFreshnessLaws, map[string]string{"state": "confirmed_stale"}) != 0 {
+		t.Fatal("expected freshness gauges cleared to 0 after collect failure")
+	}
+	if reg.GaugeValue(metrics.MetricFreshnessLaws, map[string]string{"state": "uncertain"}) != 0 {
+		t.Fatal("expected uncertain gauge cleared to 0")
+	}
+}
+
 func TestExportCacheLookupMetrics(t *testing.T) {
 	mt := httpmock.New()
 	reg := metrics.NewRegistry()

@@ -12,6 +12,7 @@ import (
 
 	"github.com/Squarenix17/gesetzeswache/internal/citation"
 	"github.com/Squarenix17/gesetzeswache/internal/config"
+	"github.com/Squarenix17/gesetzeswache/internal/discovery"
 	"github.com/Squarenix17/gesetzeswache/internal/domain"
 	"github.com/Squarenix17/gesetzeswache/internal/export"
 	"github.com/Squarenix17/gesetzeswache/internal/httpx"
@@ -416,6 +417,289 @@ func TestIntegration_MiLoG_linkedChain_currentOnlyByDefault(t *testing.T) {
 	}
 	if _, ok, _ := svc.Store.GetLaw("milov4"); !ok {
 		t.Fatal("ensure should create past child stubs too")
+	}
+}
+
+func TestIntegration_SGB11_discovered_withoutTSV(t *testing.T) {
+	// No TSV seed — discovered edge from PBAV XML ingest must drive linked_instruments + fail-safe.
+	mt := httpmock.New()
+	svc := newTestService(t, mt)
+	seedCatalog(t, svc, mt)
+	// svc.Instruments left nil (no TSV catalog)
+
+	law := domain.Law{
+		ID: "sgb11", Abbreviation: "SGB XI", Title: "Sozialgesetzbuch XI",
+		GIIPath: "sgb_11", GIIURL: "https://www.gesetze-im-internet.de/sgb_11/",
+	}
+	pbav := domain.Law{
+		ID: "pbav2025", Abbreviation: "PBAV 2025",
+		Title: "Pflegeberufe-Ausbildungs- und Prüfungsverordnung",
+		GIIPath: "pbav_2025", GIIURL: "https://www.gesetze-im-internet.de/pbav_2025/",
+	}
+	if err := svc.Store.UpsertLaws([]domain.Law{law, pbav}); err != nil {
+		t.Fatal(err)
+	}
+	laws, _ := svc.Store.ListLaws()
+	variants, _ := svc.Store.ListVariants()
+	svc.Search.Swap(laws, variants)
+
+	lookup := discovery.CatalogLookup{Laws: laws, Variants: variants}
+	xmlBody := fixtures.MustRead("pbav_2025_snippet.xml")
+	n, err := discovery.IngestLawXML(svc.Store, lookup, pbav, xmlBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("IngestLawXML n=%d want 1", n)
+	}
+
+	now := time.Now().UTC()
+	_ = svc.Store.SetMetaTime("last_toc_success", now)
+	_ = svc.Store.SetMetaTime("last_bgbl_feed_success", now)
+	stand := citation.Parse("sgb11", "Zuletzt geändert durch Art. 1 G v. 20.12.2024 BGBl. 2024 I Nr. 400")
+	if !stand.ParseOK {
+		t.Fatalf("stand parse failed: %+v", stand)
+	}
+	if err := svc.Store.UpsertStand(stand); err != nil {
+		t.Fatal(err)
+	}
+
+	meta, err := svc.Freshness(context.Background(), "sgb11", IncludeOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.State != domain.FreshnessUncertain {
+		t.Fatalf("state=%s want uncertain", meta.State)
+	}
+	if meta.Rationale != "unresolved_linked_instrument_refs" {
+		t.Fatalf("rationale=%q", meta.Rationale)
+	}
+	if len(meta.LinkedInstruments) != 1 || meta.LinkedInstruments[0].GIISlug != "pbav_2025" {
+		t.Fatalf("want [pbav_2025], got %+v", meta.LinkedInstruments)
+	}
+	li := meta.LinkedInstruments[0]
+	if li.SectionHint != "§ 55" {
+		t.Fatalf("section_hint=%q", li.SectionHint)
+	}
+	if li.Source != discovery.SourceDiscovered {
+		t.Fatalf("source=%q want %q", li.Source, discovery.SourceDiscovered)
+	}
+}
+
+func TestIntegration_SGB11_pbav2025_linkedInstrument(t *testing.T) {
+	mt := httpmock.New()
+	svc := newTestService(t, mt)
+	seedCatalog(t, svc, mt)
+
+	cat, err := instruments.LoadTSV(filepath.Join("..", "..", "variants", "linked_instruments.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.Instruments = cat
+
+	law := domain.Law{
+		ID: "sgb11", Abbreviation: "SGB XI", Title: "Sozialgesetzbuch XI",
+		GIIPath: "sgb_11", GIIURL: "https://www.gesetze-im-internet.de/sgb_11/",
+	}
+	if err := svc.Store.UpsertLaws([]domain.Law{law}); err != nil {
+		t.Fatal(err)
+	}
+	laws, _ := svc.Store.ListLaws()
+	variants, _ := svc.Store.ListVariants()
+	svc.Search.Swap(laws, variants)
+
+	now := time.Now().UTC()
+	_ = svc.Store.SetMetaTime("last_toc_success", now)
+	_ = svc.Store.SetMetaTime("last_bgbl_feed_success", now)
+	stand := citation.Parse("sgb11", "Zuletzt geändert durch Art. 1 G v. 20.12.2024 BGBl. 2024 I Nr. 400")
+	if !stand.ParseOK {
+		t.Fatalf("stand parse failed: %+v", stand)
+	}
+	if err := svc.Store.UpsertStand(stand); err != nil {
+		t.Fatal(err)
+	}
+
+	meta, err := svc.Freshness(context.Background(), "sgb11", IncludeOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(meta.LinkedInstruments) != 1 || meta.LinkedInstruments[0].GIISlug != "pbav_2025" {
+		t.Fatalf("want [pbav_2025], got %+v", meta.LinkedInstruments)
+	}
+	if meta.LinkedInstruments[0].SectionHint != "§ 55" {
+		t.Fatalf("section_hint=%q", meta.LinkedInstruments[0].SectionHint)
+	}
+	if meta.State == domain.FreshnessConfirmedCurrent {
+		t.Fatalf("parent must not be confirmed_current; state=%s rationale=%s", meta.State, meta.Rationale)
+	}
+	if meta.Rationale != "unresolved_linked_instrument_refs" {
+		t.Fatalf("rationale=%q", meta.Rationale)
+	}
+
+	linked, err := svc.Freshness(context.Background(), "sgb11", IncludeOpts{Linked: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(linked.LinkedInstruments) != 1 {
+		t.Fatalf("linked len=%d", len(linked.LinkedInstruments))
+	}
+	li := linked.LinkedInstruments[0]
+	if !li.ResolveOK || li.LawID != "pbav2025" {
+		t.Fatalf("pointers %+v", li)
+	}
+	if _, ok, _ := svc.Store.GetLaw("pbav2025"); !ok {
+		t.Fatal("expected pbav2025 stub in catalog")
+	}
+}
+
+func TestIntegration_ArbZG_confirmedCurrentWithoutSeededInstruments(t *testing.T) {
+	mt := httpmock.New()
+	svc := newTestService(t, mt)
+	seedCatalog(t, svc, mt)
+
+	now := time.Now().UTC()
+	_ = svc.Store.SetMetaTime("last_toc_success", now)
+	_ = svc.Store.SetMetaTime("last_bgbl_feed_success", now)
+
+	stand := citation.Parse("arbzg", "Zuletzt geändert durch Art. 1 G v. 20.7.2022 BGBl. 2022 I Nr. 1170")
+	if !stand.ParseOK {
+		t.Fatalf("stand parse failed: %+v", stand)
+	}
+	if err := svc.Store.UpsertStand(stand); err != nil {
+		t.Fatal(err)
+	}
+	// Textnachweis-style editorial without operative V/Bek BGBl Nr — must not force uncertain.
+	if err := svc.Store.SetMeta("editorial:arbzg", "(+++ Textnachweis der Geltung des § 16 Abs. 2: 1.1.2024 +++)"); err != nil {
+		t.Fatal(err)
+	}
+
+	meta, err := svc.Freshness(context.Background(), "arbzg", IncludeOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.State != domain.FreshnessConfirmedCurrent {
+		t.Fatalf("ArbZG want confirmed_current; got %s (%s) refs=%+v", meta.State, meta.Rationale, meta.InstrumentRefs)
+	}
+}
+
+func TestIntegration_BGB_editorialGRefs_notForcedUncertain(t *testing.T) {
+	// Mass-code noise: editorial +++ cites G / empty-Kind / bare BEK ≠ Stand → must not permanent uncertain.
+	mt := httpmock.New()
+	svc := newTestService(t, mt)
+	seedCatalog(t, svc, mt)
+
+	now := time.Now().UTC()
+	_ = svc.Store.SetMetaTime("last_toc_success", now)
+	_ = svc.Store.SetMetaTime("last_bgbl_feed_success", now)
+
+	stand := citation.Parse("bgb", "Zuletzt geändert durch Art. 1 G v. 16.8.2023 BGBl. 2023 I Nr. 198")
+	if !stand.ParseOK {
+		t.Fatalf("stand parse failed: %+v", stand)
+	}
+	if err := svc.Store.UpsertStand(stand); err != nil {
+		t.Fatal(err)
+	}
+	blob := strings.Join([]string{
+		"(+++ Art. 2 G v. 15.1.2024 I Nr. 12 +++)",
+		"(+++ geändert durch BGBl. 2022 I Nr. 99 +++)",
+		"(+++ Hinweis: Art. 5 G v. 1.6.2021 I Nr. 45 +++)",
+		"(+++ Bek. v. 1.11.2023 I Nr. 296 +++)",
+		"(+++ Bek. v. 27.2.2024 I Nr. 69 +++)",
+	}, "\n")
+	if err := svc.Store.SetMeta("editorial:bgb", blob); err != nil {
+		t.Fatal(err)
+	}
+
+	meta, err := svc.Freshness(context.Background(), "bgb", IncludeOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.State != domain.FreshnessConfirmedCurrent {
+		t.Fatalf("BGB editorial G/BEK noise must not force uncertain; got %s (%s) refs=%+v",
+			meta.State, meta.Rationale, meta.InstrumentRefs)
+	}
+	if meta.Rationale == "unresolved_linked_instrument_refs" {
+		t.Fatal("rationale must not be unresolved_linked_instrument_refs for mass-code editorial refs")
+	}
+}
+
+func TestIntegration_ArbZG_repairsStaleUnparsedStand(t *testing.T) {
+	// Live failure mode: Raw present, ParseOK false (stale row) — freshness must re-parse and clear.
+	mt := httpmock.New()
+	svc := newTestService(t, mt)
+	seedCatalog(t, svc, mt)
+
+	now := time.Now().UTC()
+	_ = svc.Store.SetMetaTime("last_toc_success", now)
+	_ = svc.Store.SetMetaTime("last_bgbl_feed_success", now)
+
+	stale := domain.StandCitation{
+		LawID:      "arbzg",
+		Raw:        "Zuletzt geändert durch Art. 52 G v. 23.10.2024 I Nr. 323",
+		Year:       2024,
+		ParseOK:    false,
+		ParseNotes: "insufficient structured fields",
+	}
+	d := time.Date(2024, 10, 23, 0, 0, 0, 0, time.UTC)
+	stale.Date = &d
+	if err := svc.Store.UpsertStand(stale); err != nil {
+		t.Fatal(err)
+	}
+
+	meta, err := svc.Freshness(context.Background(), "arbzg", IncludeOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Stand == nil || !meta.Stand.ParseOK {
+		t.Fatalf("expected repaired Stand parse_ok; stand=%+v", meta.Stand)
+	}
+	if meta.Stand.Number != "323" || meta.Stand.Teil != 1 {
+		t.Fatalf("repaired stand=%+v want teil=1 number=323", meta.Stand)
+	}
+	if meta.State != domain.FreshnessConfirmedCurrent {
+		t.Fatalf("ArbZG after repair want confirmed_current; got %s (%s)", meta.State, meta.Rationale)
+	}
+}
+
+func TestIntegration_MiLoV5_export_fundstelleStand_confirmedCurrent(t *testing.T) {
+	// Child Verordnung: no standangabe; fundstelle → Stand → confirmed_current when sync fresh.
+	mt := httpmock.New()
+	svc := newTestService(t, mt)
+	seedCatalog(t, svc, mt)
+
+	law := domain.Law{
+		ID: "milov5", Abbreviation: "MiLoV5", Title: "Fünfte Mindestlohnanpassungsverordnung",
+		GIIPath: "milov5", GIIURL: "https://www.gesetze-im-internet.de/milov5/",
+	}
+	if err := svc.Store.UpsertLaws([]domain.Law{law}); err != nil {
+		t.Fatal(err)
+	}
+	laws, _ := svc.Store.ListLaws()
+	variants, _ := svc.Store.ListVariants()
+	svc.Search.Swap(laws, variants)
+
+	now := time.Now().UTC()
+	_ = svc.Store.SetMetaTime("last_toc_success", now)
+	_ = svc.Store.SetMetaTime("last_bgbl_feed_success", now)
+
+	xmlBody := fixtures.MustRead("milov5_snippet.xml")
+	mt.SetBytes("www.gesetze-im-internet.de", "/milov5/xml.zip", fixtures.MustZipXML("milov5.xml", xmlBody))
+
+	res, err := svc.ExportText(context.Background(), "milov5", []string{export.FormatNormtext}, IncludeOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Freshness == nil {
+		t.Fatal("expected freshness")
+	}
+	if res.Freshness.Stand == nil || !res.Freshness.Stand.ParseOK {
+		t.Fatalf("expected fundstelle Stand parse_ok; stand=%+v", res.Freshness.Stand)
+	}
+	if res.Freshness.Stand.Year != 2025 || res.Freshness.Stand.Number != "268" {
+		t.Fatalf("stand=%+v want 2025/268", res.Freshness.Stand)
+	}
+	if res.Freshness.State != domain.FreshnessConfirmedCurrent {
+		t.Fatalf("milov5 want confirmed_current; got %s (%s)", res.Freshness.State, res.Freshness.Rationale)
 	}
 }
 

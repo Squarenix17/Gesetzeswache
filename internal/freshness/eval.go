@@ -2,6 +2,7 @@
 package freshness
 
 import (
+	"strings"
 	"time"
 
 	"github.com/Squarenix17/gesetzeswache/internal/citation"
@@ -14,8 +15,9 @@ type Input struct {
 	Stand              domain.StandCitation
 	LinkedIssues       []domain.GazetteIssue // issues linked to this law (confirmed or heuristic)
 	LinkClasses        map[string]domain.LinkClass // issueID → class; optional
-	InstrumentRefs     []domain.InstrumentRef      // from Stand / +++ notes
-	InstrumentIssues   []domain.GazetteIssue       // store issues matching InstrumentRefs
+	InstrumentRefs             []domain.InstrumentRef // from Stand / +++ notes
+	InstrumentIssues           []domain.GazetteIssue  // store issues matching InstrumentRefs
+	HasSeededLinkedInstruments bool                   // seeded TSV and/or high-confidence discovered linked instruments
 	LastTOCSuccess     time.Time
 	LastGIIFeedSuccess time.Time
 	LastBGBlSuccess    time.Time // feed or probe
@@ -181,9 +183,21 @@ func unresolvedInstrumentRefs(in Input) bool {
 			in.Stand.Number == ref.Number {
 			continue
 		}
-		// Any distinct instrument citation (esp. Verordnung / Bek.) is amendment-by-reference
-		// evidence that Stand alone cannot clear → fail closed to uncertain.
-		return true
+		// Operative amendment-by-reference: Verordnung always fail-closes.
+		// Bare Bekanntmachung on mass codes is editorial history (like G) — ignore.
+		// Section-scoped BEK still fail-closes (operative pointer).
+		kind := strings.ToUpper(ref.Kind)
+		if kind == "V" {
+			return true
+		}
+		if kind == "BEK" && strings.TrimSpace(ref.SectionHint) != "" {
+			return true
+		}
+		// Seeded parent→instrument laws: empty-Kind / bare BEK notes from TSV still fail closed.
+		if in.HasSeededLinkedInstruments {
+			return true
+		}
+		// Kind G, empty, or bare BEK: mass-code editorial / in-law cross-refs — ignore.
 	}
 	return false
 }

@@ -18,6 +18,9 @@ import (
 	"github.com/Squarenix17/gesetzeswache/internal/freshness"
 	"github.com/Squarenix17/gesetzeswache/internal/giiurl"
 	"github.com/Squarenix17/gesetzeswache/internal/httpx"
+	"github.com/Squarenix17/gesetzeswache/internal/instruments"
+	"github.com/Squarenix17/gesetzeswache/internal/metrics"
+	"github.com/Squarenix17/gesetzeswache/internal/normalize"
 	"github.com/Squarenix17/gesetzeswache/internal/search"
 	"github.com/Squarenix17/gesetzeswache/internal/store"
 	"github.com/Squarenix17/gesetzeswache/internal/sync"
@@ -25,13 +28,15 @@ import (
 
 // Service exposes core operations.
 type Service struct {
-	CFG    config.Config
-	Store  *store.Store
-	Search *search.Engine
-	Sync   *sync.Orchestrator
-	HTTP   *httpx.Client
-	Export *export.Cache
-	Log    *slog.Logger
+	CFG         config.Config
+	Store       *store.Store
+	Search      *search.Engine
+	Sync        *sync.Orchestrator
+	HTTP        *httpx.Client
+	Export      *export.Cache
+	Log         *slog.Logger
+	Metrics     *metrics.Registry
+	Instruments *instruments.Catalog
 }
 
 // Envelope is the API response shape.
@@ -60,6 +65,8 @@ type FreshnessMeta struct {
 	Stand              *domain.StandCitation     `json:"stand,omitempty"`
 	GIIURL             string                    `json:"gii_url,omitempty"`
 	BGBlPointers       []string                  `json:"bgbl_pointers,omitempty"`
+	LinkedInstruments  []domain.LinkedInstrument `json:"linked_instruments,omitempty"`
+	InstrumentRefs     []domain.InstrumentRef    `json:"instrument_refs,omitempty"`
 }
 
 type ResolveResult struct {
@@ -136,7 +143,9 @@ func (s *Service) freshnessFor(lawID string) (FreshnessMeta, error) {
 	links, _ := s.Store.LinksForLaw(lawID)
 	var issues []domain.GazetteIssue
 	var pointers []string
+	classes := map[string]domain.LinkClass{}
 	for _, l := range links {
+		classes[l.IssueID] = l.Class
 		if iss, ok, _ := s.Store.GetIssue(l.IssueID); ok {
 			issues = append(issues, iss)
 			if iss.ELIURL != "" {
@@ -154,10 +163,15 @@ func (s *Service) freshnessFor(lawID string) (FreshnessMeta, error) {
 		bgbl = eliT
 		probeOnly = true
 	}
+	instrRefs, instrIssues := instruments.CollectEvidence(s.Store, s.Instruments, lawID, stand)
+	seeded := s.seededInstruments(lawID)
 	rec := freshness.Evaluate(freshness.Input{
 		LawID:              lawID,
 		Stand:              stand,
 		LinkedIssues:       issues,
+		LinkClasses:        classes,
+		InstrumentRefs:     instrRefs,
+		InstrumentIssues:   instrIssues,
 		LastTOCSuccess:     tocT,
 		LastGIIFeedSuccess: giiT,
 		LastBGBlSuccess:    bgbl,
@@ -167,15 +181,17 @@ func (s *Service) freshnessFor(lawID string) (FreshnessMeta, error) {
 	})
 	_ = s.Store.PutFreshness(rec)
 	meta := FreshnessMeta{
-		State:           rec.State,
-		Confidence:      rec.Confidence,
-		Method:          rec.Method,
-		EvaluatedAt:     rec.EvaluatedAt,
-		NewerIssueIDs:   rec.NewerIssueIDs,
-		Rationale:       rec.Rationale,
-		Stand:           &stand,
-		GIIURL:          law.GIIURL,
-		BGBlPointers:    pointers,
+		State:             rec.State,
+		Confidence:        rec.Confidence,
+		Method:            rec.Method,
+		EvaluatedAt:       rec.EvaluatedAt,
+		NewerIssueIDs:     rec.NewerIssueIDs,
+		Rationale:         rec.Rationale,
+		Stand:             &stand,
+		GIIURL:            law.GIIURL,
+		BGBlPointers:      pointers,
+		LinkedInstruments: seeded,
+		InstrumentRefs:    instrRefs,
 	}
 	if !tocT.IsZero() {
 		meta.LastTOCSuccess = &tocT
@@ -184,6 +200,26 @@ func (s *Service) freshnessFor(lawID string) (FreshnessMeta, error) {
 		meta.LastBGBlSuccess = &bgbl
 	}
 	return meta, nil
+}
+
+func (s *Service) seededInstruments(lawID string) []domain.LinkedInstrument {
+	return instruments.ForParentSafe(s.Instruments, lawID)
+}
+
+// PersistEditorialInstruments stores +++ citation blob + fingerprint after export IR build.
+func (s *Service) PersistEditorialInstruments(lawID string, ir export.IR) {
+	texts := export.EditorialCitationTexts(ir)
+	if len(texts) == 0 {
+		return
+	}
+	blob := strings.Join(texts, "\n")
+	if err := s.Store.SetMeta("editorial:"+lawID, blob); err != nil && s.Log != nil {
+		s.Log.Warn("persist editorial instruments", "law", lawID, "err", err)
+	}
+	refs := export.InstrumentRefsFromIR(ir)
+	if err := s.Store.SetMeta("editorial_fp:"+lawID, citation.FingerprintInstruments(refs)); err != nil && s.Log != nil {
+		s.Log.Warn("persist editorial fingerprint", "law", lawID, "err", err)
+	}
 }
 
 func (s *Service) ListStale(ctx context.Context) ([]domain.FreshnessRecord, error) {
@@ -203,6 +239,13 @@ func (s *Service) ForceRecheck(ctx context.Context, lawID string) error {
 		if law, ok, _ := s.Store.GetLaw(lawID); ok {
 			_ = s.Sync.RefreshStandForLaw(ctx, law)
 			s.Export.InvalidateLaw(law.ID)
+			// Also refresh seeded linked ordinance Stands (MiLoV4/MiLoV5, …).
+			for _, li := range s.seededInstruments(lawID) {
+				childID := normalize.Key(li.GIISlug)
+				if child, ok, _ := s.Store.GetLaw(childID); ok {
+					_ = s.Sync.RefreshStandForLaw(ctx, child)
+				}
+			}
 		}
 	}
 	return s.Sync.Reconcile(ctx)
@@ -239,6 +282,53 @@ func (s *Service) SyncStatus(ctx context.Context) (domain.SyncStatus, error) {
 		(!eli.IsZero() && now.Sub(eli) <= s.CFG.FreshnessMaxAge)
 	st.DataFresh = tocOK && now.Sub(toc) <= s.CFG.FreshnessMaxAge && bgblOK
 	return st, nil
+}
+
+// CollectMetrics refreshes scrape-time gauges into reg (typically the shared Registry).
+func (s *Service) CollectMetrics(reg *metrics.Registry) {
+	if s == nil || reg == nil || s.Store == nil {
+		return
+	}
+	st, err := s.SyncStatus(context.Background())
+	if err != nil {
+		if s.Log != nil {
+			s.Log.Warn("metrics collect SyncStatus failed", "err", err)
+		}
+		return
+	}
+	ready, fresh := 0.0, 0.0
+	if st.CatalogReady {
+		ready = 1
+	}
+	if st.DataFresh {
+		fresh = 1
+	}
+	_ = reg.SetGauge(metrics.MetricCatalogReady, nil, ready)
+	_ = reg.SetGauge(metrics.MetricDataFresh, nil, fresh)
+
+	setTS := func(source string, t *time.Time) {
+		v := 0.0
+		if t != nil && !t.IsZero() {
+			v = float64(t.Unix())
+		}
+		_ = reg.SetGauge(metrics.MetricSyncLastSuccess, map[string]string{"source": source}, v)
+	}
+	setTS("toc", st.LastTOCSuccess)
+	setTS("gii_feed", st.LastGIIFeedSuccess)
+	setTS("bgbl_feed", st.LastBGBlFeedSuccess)
+	setTS("eli_probe", st.LastELIProbeSuccess)
+	setTS("reconcile", st.LastReconcileAt)
+
+	counts, err := s.Store.CountFreshnessByState()
+	if err != nil {
+		if s.Log != nil {
+			s.Log.Warn("metrics collect CountFreshnessByState failed", "err", err)
+		}
+		return
+	}
+	for state, n := range counts {
+		_ = reg.SetGauge(metrics.MetricFreshnessLaws, map[string]string{"state": string(state)}, float64(n))
+	}
 }
 
 type ExportResult struct {
@@ -335,7 +425,10 @@ func (s *Service) exportLaw(ctx context.Context, law domain.Law, meta FreshnessM
 
 	contentID := export.ContentIDFromStand(stand)
 	ir, ok := s.Export.Get(law.ID, contentID)
-	if !ok {
+	if ok {
+		_ = s.Metrics.IncCounter(metrics.MetricExportCacheLookups, map[string]string{"result": "hit"}, 1)
+	} else {
+		_ = s.Metrics.IncCounter(metrics.MetricExportCacheLookups, map[string]string{"result": "miss"}, 1)
 		if err := ensureXML(); err != nil {
 			return ExportResult{Matched: true, Law: &law, Freshness: &meta}, err
 		}
@@ -345,6 +438,13 @@ func (s *Service) exportLaw(ctx context.Context, law domain.Law, meta FreshnessM
 		}
 		ir = built
 		s.Export.Put(ir)
+	}
+	s.PersistEditorialInstruments(law.ID, ir)
+	if newMeta, err := s.freshnessFor(law.ID); err == nil {
+		meta = newMeta
+		if meta.Stand != nil {
+			stand = *meta.Stand
+		}
 	}
 	out := ExportResult{
 		Matched:             true,

@@ -31,6 +31,7 @@ type Config struct {
 	ELIBase            string
 	SharedSecret       string // optional; empty = disabled
 	VariantsPath       string
+	LinkedInstrumentsPath string
 	RefuseExportStale  bool
 	StandRefreshMax    int // max laws missing Stand to refresh at InitialSync (0 = skip bulk)
 }
@@ -59,6 +60,7 @@ func Load() (Config, error) {
 		ELIBase:          env("GEW_ELI_BASE", "https://www.recht.bund.de/eli/bund"),
 		SharedSecret:     os.Getenv("GEW_SHARED_SECRET"),
 		VariantsPath:     env("GEW_VARIANTS_PATH", "variants/variants.tsv"),
+		LinkedInstrumentsPath: env("GEW_LINKED_INSTRUMENTS_PATH", "variants/linked_instruments.tsv"),
 		RefuseExportStale: envBool("GEW_REFUSE_EXPORT_STALE", false),
 		StandRefreshMax:   envInt("GEW_STAND_REFRESH_MAX", 10),
 	}

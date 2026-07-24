@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dokument SYSTEM "https://www.gesetze-im-internet.de/dtd/1.01/gii-norm.dtd">
+<dokument>
+  <norm builddate="20260512120000" doknr="BJNR000000000BJNE000100000">
+    <metadaten>
+      <jurabk>MiLoG</jurabk>
+      <langue>Mindestlohngesetz</langue>
+      <ausfertigung-datum man="ja">2014-08-11</ausfertigung-datum>
+      <fundstelle>
+        <periodikum>BGBl. I</periodikum>
+        <zit>2014 S. 1348</zit>
+      </fundstelle>
+      <standangabe>
+        <standtyp>Stand</standtyp>
+        <standkommentar>Zuletzt geändert durch Art. 8 Abs. 3 G v. 12.5.2026 I Nr. 137</standkommentar>
+      </standangabe>
+      <metangabe>(+++ Hinweis: Zur Anpassung des Mindestlohns nach § 1 Abs. 2 vgl. § 1 V v. 5.11.2025 I Nr. 268 +++)</metangabe>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P>MiLoG</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+
+  <norm builddate="20260512120001" doknr="BJNR000000000BJNE000101000">
+    <metadaten>
+      <jurabk>MiLoG</jurabk>
+      <enbez>§ 1</enbez>
+      <titel format="parat">Mindestlohn</titel>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P nr="1">Jeder Arbeitnehmer hat Anspruch auf Zahlung eines Arbeitsentgelts mindestens in Höhe des Mindestlohns durch den Arbeitgeber.</P>
+          <P nr="2">Die Höhe des Mindestlohns beträgt ab dem 1. Oktober 2022 brutto 12 Euro je Zeitstunde.</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+</dokument>

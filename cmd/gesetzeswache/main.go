@@ -18,14 +18,16 @@ import (
 	"github.com/Squarenix17/gesetzeswache/internal/domain"
 	"github.com/Squarenix17/gesetzeswache/internal/export"
 	"github.com/Squarenix17/gesetzeswache/internal/httpx"
+	"github.com/Squarenix17/gesetzeswache/internal/instruments"
 	"github.com/Squarenix17/gesetzeswache/internal/mcp"
+	"github.com/Squarenix17/gesetzeswache/internal/metrics"
 	"github.com/Squarenix17/gesetzeswache/internal/search"
 	"github.com/Squarenix17/gesetzeswache/internal/service"
 	"github.com/Squarenix17/gesetzeswache/internal/store"
 	"github.com/Squarenix17/gesetzeswache/internal/sync"
 )
 
-const version = "0.1.0"
+const version = "0.2.0"
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -46,7 +48,18 @@ func run(args []string) int {
 	}
 	defer st.Close()
 
+	reg := metrics.NewRegistry()
+	metrics.RegisterDefaults(reg)
+
+	instrCat, err := instruments.LoadTSV(cfg.LinkedInstrumentsPath)
+	if err != nil {
+		log.Error("load linked instruments", "err", err)
+		return 1
+	}
+	log.Info("linked instruments loaded", "path", cfg.LinkedInstrumentsPath, "parents", instrCat.Len())
+
 	httpClient := httpx.New(cfg.HTTPTimeout, cfg.RequestMinGap, 32<<20)
+	httpClient.Metrics = reg
 	eng := search.NewEngine()
 	if laws, err := st.ListLaws(); err == nil {
 		variants, _ := st.ListVariants()
@@ -54,15 +67,17 @@ func run(args []string) int {
 	}
 	_ = loadVariantsFile(cfg.VariantsPath, st, eng, log)
 
-	orch := &sync.Orchestrator{CFG: cfg, Store: st, HTTP: httpClient, Search: eng, Log: log}
+	orch := &sync.Orchestrator{CFG: cfg, Store: st, HTTP: httpClient, Search: eng, Log: log, Metrics: reg, Instruments: instrCat}
 	svc := &service.Service{
-		CFG:    cfg,
-		Store:  st,
-		Search: eng,
-		Sync:   orch,
-		HTTP:   httpClient,
-		Export: export.NewCache(cfg.ExportCacheMax),
-		Log:    log,
+		CFG:         cfg,
+		Store:       st,
+		Search:      eng,
+		Sync:        orch,
+		HTTP:        httpClient,
+		Export:      export.NewCache(cfg.ExportCacheMax),
+		Log:         log,
+		Metrics:     reg,
+		Instruments: instrCat,
 	}
 
 	if len(args) == 0 {
@@ -93,7 +108,7 @@ func serve(cfg config.Config, svc *service.Service, orch *sync.Orchestrator, log
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	srv := &apihttp.Server{Svc: svc, SharedSecret: cfg.SharedSecret}
+	srv := &apihttp.Server{Svc: svc, SharedSecret: cfg.SharedSecret, Metrics: svc.Metrics}
 	httpSrv := &http.Server{Addr: cfg.HTTPAddr, Handler: srv.Handler()}
 	go func() {
 		log.Info("http listening", "addr", cfg.HTTPAddr, "version", version)

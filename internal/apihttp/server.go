@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Squarenix17/gesetzeswache/internal/metrics"
 	"github.com/Squarenix17/gesetzeswache/internal/service"
 )
 
@@ -15,6 +16,7 @@ import (
 type Server struct {
 	Svc          *service.Service
 	SharedSecret string
+	Metrics      *metrics.Registry
 }
 
 func (s *Server) Handler() http.Handler {
@@ -27,7 +29,18 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/recheck", s.recheck)
 	mux.HandleFunc("/v1/sync/status", s.syncStatus)
 	mux.HandleFunc("/v1/export", s.export)
+	if s.Metrics == nil {
+		s.Metrics = metrics.NewRegistry()
+		metrics.RegisterDefaults(s.Metrics)
+	}
+	mux.Handle("/metrics", s.Metrics.Handler(s.collectMetrics))
 	return mux
+}
+
+func (s *Server) collectMetrics(reg *metrics.Registry) {
+	if s != nil && s.Svc != nil {
+		s.Svc.CollectMetrics(reg)
+	}
 }
 
 func (s *Server) write(w http.ResponseWriter, status int, data any, errMsg string) {

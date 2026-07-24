@@ -1,6 +1,45 @@
 package citation
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Squarenix17/gesetzeswache/internal/domain"
+)
+
+func TestParseMiLoGStand(t *testing.T) {
+	c := Parse("milog", "Zuletzt geändert durch Art. 8 Abs. 3 G v. 12.5.2026 I Nr. 137")
+	if !c.ParseOK {
+		t.Fatalf("expected parse ok, notes=%s", c.ParseNotes)
+	}
+	if c.Year != 2026 || c.Teil != 1 || c.Number != "137" {
+		t.Fatalf("got year=%d teil=%d num=%s", c.Year, c.Teil, c.Number)
+	}
+}
+
+func TestParseLinkedInstruments(t *testing.T) {
+	refs := ParseLinkedInstruments("§ 1 V v. 5.11.2025 I Nr. 268")
+	if len(refs) != 1 {
+		t.Fatalf("expected 1 ref, got %d", len(refs))
+	}
+	ref := refs[0]
+	if ref.Kind != "V" || ref.Year != 2025 || ref.Teil != 1 || ref.Number != "268" {
+		t.Fatalf("got %+v", ref)
+	}
+	if ref.SectionHint != "§ 1" {
+		t.Fatalf("section hint: got %q", ref.SectionHint)
+	}
+}
+
+func TestFingerprintInstruments(t *testing.T) {
+	a := []domain.InstrumentRef{{Kind: "V", Teil: 1, Year: 2025, Number: "268"}}
+	b := []domain.InstrumentRef{{Kind: "V", Teil: 1, Year: 2025, Number: "268"}}
+	if FingerprintInstruments(a) != FingerprintInstruments(b) {
+		t.Fatal("expected stable fingerprint")
+	}
+	if FingerprintInstruments(nil) != "" {
+		t.Fatal("empty refs should yield empty fingerprint")
+	}
+}
 
 func TestParseYearNumber(t *testing.T) {
 	c := Parse("bgb", "Zuletzt geändert durch Art. 1 G v. 16.8.2023 BGBl. 2023 I Nr. 217")

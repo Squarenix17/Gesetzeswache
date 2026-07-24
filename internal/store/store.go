@@ -262,6 +262,26 @@ func (s *Store) ListFreshnessByState(state domain.FreshnessState) ([]domain.Fres
 	return out, err
 }
 
+// CountFreshnessByState returns counts of freshness records per known state.
+func (s *Store) CountFreshnessByState() (map[domain.FreshnessState]int, error) {
+	out := map[domain.FreshnessState]int{
+		domain.FreshnessConfirmedCurrent: 0,
+		domain.FreshnessConfirmedStale:   0,
+		domain.FreshnessUncertain:        0,
+	}
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		return tx.Bucket(bucketFreshness).ForEach(func(_, v []byte) error {
+			var r domain.FreshnessRecord
+			if err := json.Unmarshal(v, &r); err != nil {
+				return err
+			}
+			out[r.State]++
+			return nil
+		})
+	})
+	return out, err
+}
+
 func (s *Store) SetMetaTime(key string, t time.Time) error {
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		return tx.Bucket(bucketSyncMeta).Put([]byte(key), []byte(t.UTC().Format(time.RFC3339Nano)))
@@ -285,6 +305,29 @@ func (s *Store) GetMetaTime(key string) (time.Time, bool, error) {
 		return nil
 	})
 	return t, found, err
+}
+
+// SetMeta stores an opaque string in sync_meta (e.g. editorial instrument fingerprint).
+func (s *Store) SetMeta(key, val string) error {
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		return tx.Bucket(bucketSyncMeta).Put([]byte(key), []byte(val))
+	})
+}
+
+// GetMeta reads an opaque string from sync_meta.
+func (s *Store) GetMeta(key string) (string, bool, error) {
+	var out string
+	var found bool
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		v := tx.Bucket(bucketSyncMeta).Get([]byte(key))
+		if v == nil {
+			return nil
+		}
+		out = string(v)
+		found = true
+		return nil
+	})
+	return out, found, err
 }
 
 func (s *Store) AppendSyncAttempt(a domain.SyncAttempt) error {

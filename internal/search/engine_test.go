@@ -48,3 +48,18 @@ func TestVariant(t *testing.T) {
 		t.Fatalf("variant failed: %+v", best)
 	}
 }
+
+func TestResolveVariantSGBXI(t *testing.T) {
+	e := NewEngine()
+	e.Swap(
+		[]domain.Law{
+			{ID: "sgb11", Abbreviation: "SGB XI", Title: "Sozialgesetzbuch XI"},
+			{ID: "sgb1", Abbreviation: "SGB I", Title: "Sozialgesetzbuch I"},
+		},
+		[]domain.LawVariant{{Variant: "SGB XI", LawID: "sgb11"}},
+	)
+	best, _ := e.Current().Resolve("SGB XI", 0.75)
+	if best == nil || best.Law.ID != "sgb11" {
+		t.Fatalf("expected sgb11, got %+v", best)
+	}
+}

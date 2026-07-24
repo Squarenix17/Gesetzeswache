@@ -38,17 +38,15 @@ func TestCollectEvidence_editorialAndSeed(t *testing.T) {
 			},
 		},
 	}
-	cat := &Catalog{byParent: map[string][]domain.LinkedInstrument{
-		"milog": {{
-			ParentLawID: "milog", Kind: "verordnung", GIISlug: "milov5",
-			Notes: "Fünfte (BGBl 2025 I Nr. 268)",
-		}},
+	linked := []domain.LinkedInstrument{{
+		ParentLawID: "milog", Kind: "verordnung", GIISlug: "milov5",
+		Notes: "Fünfte (BGBl 2025 I Nr. 268)",
 	}}
 	stand := domain.StandCitation{
 		LawID: "milog", Year: 2026, Teil: 1, Number: "137", ParseOK: true,
 		Raw: "G v. 12.5.2026 I Nr. 137",
 	}
-	refs, issues := CollectEvidence(st, cat, "milog", stand)
+	refs, issues := CollectEvidence(st, linked, "milog", stand)
 	if len(refs) == 0 {
 		t.Fatal("expected refs")
 	}

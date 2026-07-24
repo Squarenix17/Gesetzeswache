@@ -13,6 +13,7 @@ import (
 
 	"github.com/Squarenix17/gesetzeswache/internal/citation"
 	"github.com/Squarenix17/gesetzeswache/internal/config"
+	"github.com/Squarenix17/gesetzeswache/internal/discovery"
 	"github.com/Squarenix17/gesetzeswache/internal/domain"
 	"github.com/Squarenix17/gesetzeswache/internal/export"
 	"github.com/Squarenix17/gesetzeswache/internal/freshness"
@@ -152,6 +153,7 @@ func (s *Service) freshnessFor(lawID string, opts IncludeOpts) (FreshnessMeta, e
 		return FreshnessMeta{}, fmt.Errorf("law not found")
 	}
 	stand, _, _ := s.Store.GetStand(lawID)
+	stand = s.repairStandIfNeeded(lawID, stand)
 	links, _ := s.Store.LinksForLaw(lawID)
 	var issues []domain.GazetteIssue
 	var pointers []string
@@ -175,9 +177,14 @@ func (s *Service) freshnessFor(lawID string, opts IncludeOpts) (FreshnessMeta, e
 		bgbl = eliT
 		probeOnly = true
 	}
-	instrRefs, instrIssues := instruments.CollectEvidence(s.Store, s.Instruments, lawID, stand)
+	linkedRows, discErr := s.linkedInstrumentsFor(lawID)
+	if discErr != nil && s.Log != nil {
+		s.Log.Warn("discovered links read failed", "law", lawID, "err", discErr)
+	}
+	hasLinked := len(linkedRows) > 0 || discErr != nil
+	instrRefs, instrIssues := instruments.CollectEvidence(s.Store, linkedRows, lawID, stand)
 	now := time.Now().UTC()
-	// Ensure seeded children exist for recheck/export; evidence still uses full seed notes.
+	// Ensure seeded TSV children exist for recheck/export.
 	if n, err := instruments.EnsureSeededChildren(s.Store, s.Instruments, s.CFG.GIIBase, lawID); err != nil {
 		if s.Log != nil {
 			s.Log.Warn("ensure seeded children", "law", lawID, "err", err)
@@ -185,24 +192,38 @@ func (s *Service) freshnessFor(lawID string, opts IncludeOpts) (FreshnessMeta, e
 	} else if n > 0 {
 		s.refreshSearchIndex()
 	}
-	seeded := instruments.AnnotateChain(s.seededInstruments(lawID), now)
+	// Ensure discovered high-confidence children exist as law stubs.
+	for _, li := range linkedRows {
+		if li.Source != discovery.SourceDiscovered {
+			continue
+		}
+		if _, neu, err := instruments.EnsureLawFromSlug(s.Store, s.CFG.GIIBase, li.GIISlug); err != nil {
+			if s.Log != nil {
+				s.Log.Warn("ensure discovered child", "law", lawID, "slug", li.GIISlug, "err", err)
+			}
+		} else if neu {
+			s.refreshSearchIndex()
+		}
+	}
+	seeded := instruments.AnnotateChain(linkedRows, now)
 	linked := instruments.FilterLinkedForResponse(seeded, opts.Past)
 	if opts.Linked {
 		linked = s.attachLinkedPointers(linked)
 	}
 	rec := freshness.Evaluate(freshness.Input{
-		LawID:              lawID,
-		Stand:              stand,
-		LinkedIssues:       issues,
-		LinkClasses:        classes,
-		InstrumentRefs:     instrRefs,
-		InstrumentIssues:   instrIssues,
-		LastTOCSuccess:     tocT,
-		LastGIIFeedSuccess: giiT,
-		LastBGBlSuccess:    bgbl,
-		BGBlFromProbeOnly:  probeOnly,
-		Now:                now,
-		MaxAge:             s.CFG.FreshnessMaxAge,
+		LawID:                      lawID,
+		Stand:                      stand,
+		LinkedIssues:               issues,
+		LinkClasses:                classes,
+		InstrumentRefs:             instrRefs,
+		InstrumentIssues:           instrIssues,
+		HasSeededLinkedInstruments: hasLinked,
+		LastTOCSuccess:             tocT,
+		LastGIIFeedSuccess:         giiT,
+		LastBGBlSuccess:            bgbl,
+		BGBlFromProbeOnly:          probeOnly,
+		Now:                        now,
+		MaxAge:                     s.CFG.FreshnessMaxAge,
 	})
 	_ = s.Store.PutFreshness(rec)
 	meta := FreshnessMeta{
@@ -227,8 +248,19 @@ func (s *Service) freshnessFor(lawID string, opts IncludeOpts) (FreshnessMeta, e
 	return meta, nil
 }
 
-func (s *Service) seededInstruments(lawID string) []domain.LinkedInstrument {
-	return instruments.ForParentSafe(s.Instruments, lawID)
+func (s *Service) linkedInstrumentsFor(lawID string) ([]domain.LinkedInstrument, error) {
+	seeded := instruments.ForParentSafe(s.Instruments, lawID)
+	var discovered []domain.LinkedInstrument
+	if s.Store != nil {
+		edges, err := s.Store.DiscoveredForParent(lawID)
+		if err != nil {
+			return discovery.Merge(seeded, nil), err
+		}
+		for _, e := range edges {
+			discovered = append(discovered, discovery.EdgeToLinked(e))
+		}
+	}
+	return discovery.Merge(seeded, discovered), nil
 }
 
 func (s *Service) refreshSearchIndex() {
@@ -260,7 +292,7 @@ func (s *Service) attachLinkedPointers(rows []domain.LinkedInstrument) []domain.
 	return out
 }
 
-// PersistEditorialInstruments stores +++ citation blob + fingerprint after export IR build.
+// PersistEditorialInstruments stores +++ citation blob after export IR build.
 func (s *Service) PersistEditorialInstruments(lawID string, ir export.IR) {
 	texts := export.EditorialCitationTexts(ir)
 	if len(texts) == 0 {
@@ -270,10 +302,22 @@ func (s *Service) PersistEditorialInstruments(lawID string, ir export.IR) {
 	if err := s.Store.SetMeta("editorial:"+lawID, blob); err != nil && s.Log != nil {
 		s.Log.Warn("persist editorial instruments", "law", lawID, "err", err)
 	}
-	refs := export.InstrumentRefsFromIR(ir)
-	if err := s.Store.SetMeta("editorial_fp:"+lawID, citation.FingerprintInstruments(refs)); err != nil && s.Log != nil {
-		s.Log.Warn("persist editorial fingerprint", "law", lawID, "err", err)
+}
+
+// repairStandIfNeeded re-parses a stored Stand when Raw is present but ParseOK is false
+// (stale rows from older parsers). Persists the repaired citation when parse succeeds.
+func (s *Service) repairStandIfNeeded(lawID string, stand domain.StandCitation) domain.StandCitation {
+	if stand.ParseOK || strings.TrimSpace(stand.Raw) == "" {
+		return stand
 	}
+	parsed := citation.Parse(lawID, stand.Raw)
+	if !parsed.ParseOK {
+		return stand
+	}
+	if err := s.Store.UpsertStand(parsed); err != nil && s.Log != nil {
+		s.Log.Warn("repair stand parse", "law", lawID, "err", err)
+	}
+	return parsed
 }
 
 func (s *Service) ListStale(ctx context.Context) ([]domain.FreshnessRecord, error) {
@@ -301,8 +345,17 @@ func (s *Service) ForceRecheck(ctx context.Context, lawID string) error {
 			} else if n > 0 {
 				s.refreshSearchIndex()
 			}
-			for _, li := range s.seededInstruments(lawID) {
+			for _, li := range func() []domain.LinkedInstrument {
+				rows, err := s.linkedInstrumentsFor(lawID)
+				if err != nil && s.Log != nil {
+					s.Log.Warn("discovered links on recheck", "law", lawID, "err", err)
+				}
+				return rows
+			}() {
 				childID := normalize.Key(li.GIISlug)
+				if li.LawID != "" {
+					childID = normalize.Key(li.LawID)
+				}
 				if child, ok, _ := s.Store.GetLaw(childID); ok {
 					_ = s.Sync.RefreshStandForLaw(ctx, child)
 					s.Export.InvalidateLaw(child.ID)
@@ -381,15 +434,42 @@ func (s *Service) CollectMetrics(reg *metrics.Registry) {
 	setTS("eli_probe", st.LastELIProbeSuccess)
 	setTS("reconcile", st.LastReconcileAt)
 
+	zeroFreshnessGauges := func() {
+		for _, state := range []domain.FreshnessState{
+			domain.FreshnessConfirmedCurrent,
+			domain.FreshnessConfirmedStale,
+			domain.FreshnessUncertain,
+		} {
+			_ = reg.SetGauge(metrics.MetricFreshnessLaws, map[string]string{"state": string(state)}, 0)
+		}
+	}
+
 	counts, err := s.Store.CountFreshnessByState()
 	if err != nil {
 		if s.Log != nil {
 			s.Log.Warn("metrics collect CountFreshnessByState failed", "err", err)
 		}
+		zeroFreshnessGauges()
 		return
 	}
+	zeroFreshnessGauges()
 	for state, n := range counts {
 		_ = reg.SetGauge(metrics.MetricFreshnessLaws, map[string]string{"state": string(state)}, float64(n))
+	}
+
+	if n, err := s.Store.CountDiscoveredLinks(); err != nil {
+		if s.Log != nil {
+			s.Log.Warn("metrics collect CountDiscoveredLinks failed", "err", err)
+		}
+	} else {
+		_ = reg.SetGauge(metrics.MetricDiscoveredLinks, nil, float64(n))
+	}
+	if n, err := s.Store.CountBGBlIndex(); err != nil {
+		if s.Log != nil {
+			s.Log.Warn("metrics collect CountBGBlIndex failed", "err", err)
+		}
+	} else {
+		_ = reg.SetGauge(metrics.MetricBGBlIndexEntries, nil, float64(n))
 	}
 }
 
@@ -462,7 +542,8 @@ func (s *Service) exportLaw(ctx context.Context, law domain.Law, meta FreshnessM
 
 	// Prefer standangabe from export XML when store Stand is empty, then re-evaluate freshness
 	// before the RefuseExportStale gate so state and Stand stay consistent.
-	if stand.Raw == "" {
+	// Also re-extract when Raw exists but ParseOK is false (stale unparsed Stand).
+	if stand.Raw == "" || !stand.ParseOK {
 		if err := ensureXML(); err == nil {
 			if raw := export.ExtractStandRaw(xmlData); raw != "" {
 				parsed := citation.Parse(law.ID, raw)
@@ -477,6 +558,15 @@ func (s *Service) exportLaw(ctx context.Context, law domain.Law, meta FreshnessM
 				} else {
 					stand = parsed
 					meta.Stand = &stand
+				}
+			} else if stand.Raw != "" && !stand.ParseOK {
+				// XML had no standangabe/fundstelle; still try repairing stored Raw.
+				stand = s.repairStandIfNeeded(law.ID, stand)
+				if newMeta, err := s.freshnessFor(law.ID, opts); err == nil {
+					meta = newMeta
+					if meta.Stand != nil {
+						stand = *meta.Stand
+					}
 				}
 			}
 		}
@@ -503,6 +593,20 @@ func (s *Service) exportLaw(ctx context.Context, law domain.Law, meta FreshnessM
 		s.Export.Put(ir)
 	}
 	s.PersistEditorialInstruments(law.ID, ir)
+	if s.CFG.DiscoveryEnabled && discovery.LooksLikeVerordnung(law) {
+		if err := ensureXML(); err != nil {
+			if s.Log != nil {
+				s.Log.Warn("discovery ensure xml on export", "law", law.ID, "err", err)
+			}
+		} else {
+			laws, _ := s.Store.ListLaws()
+			variants, _ := s.Store.ListVariants()
+			lookup := discovery.CatalogLookup{Laws: laws, Variants: variants}
+			if _, err := discovery.IngestLawXML(s.Store, lookup, law, xmlData); err != nil && s.Log != nil {
+				s.Log.Warn("discovery ingest on export", "law", law.ID, "err", err)
+			}
+		}
+	}
 	if newMeta, err := s.freshnessFor(law.ID, opts); err == nil {
 		meta = newMeta
 		if meta.Stand != nil {

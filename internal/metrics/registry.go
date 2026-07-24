@@ -18,6 +18,9 @@ const (
 	MetricFreshnessLaws      = "gew_freshness_laws"
 	MetricExportCacheLookups = "gew_export_cache_lookups_total"
 	MetricOutboundHTTP       = "gew_outbound_http_requests_total"
+	MetricDiscoveredLinks    = "gew_discovered_links"
+	MetricDiscoveryIngestTotal = "gew_discovery_ingest_total" // labels result=
+	MetricBGBlIndexEntries   = "gew_bgbl_index_entries"
 )
 
 var (
@@ -64,6 +67,9 @@ func RegisterDefaults(r *Registry) {
 	r.RegisterHelp(MetricFreshnessLaws, "Number of laws by freshness state", "gauge")
 	r.RegisterHelp(MetricExportCacheLookups, "Export IR cache lookups by result", "counter")
 	r.RegisterHelp(MetricOutboundHTTP, "Outbound HTTP requests by host and result", "counter")
+	r.RegisterHelp(MetricDiscoveredLinks, "Number of persisted discovered parent→child links", "gauge")
+	r.RegisterHelp(MetricDiscoveryIngestTotal, "Discovery ingest operations by result", "counter")
+	r.RegisterHelp(MetricBGBlIndexEntries, "Number of BGBl citation index entries", "gauge")
 }
 
 // CounterValue returns the current counter value for name+labels (0 if missing).

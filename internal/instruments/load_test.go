@@ -10,8 +10,8 @@ func TestLoadTSV(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "linked.tsv")
 	content := `# comment
-milog	verordnung	milov4	Vierte Mindestlohnanpassungsverordnung (BGBl 2023 I Nr. 321)
-milog	verordnung	milov5	Fünfte Mindestlohnanpassungsverordnung (BGBl 2025 I Nr. 268)
+milog	verordnung	milov4	Vierte Mindestlohnanpassungsverordnung (BGBl 2023 I Nr. 321)	2024-01-01	§ 1
+milog	verordnung	milov5	Fünfte Mindestlohnanpassungsverordnung (BGBl 2025 I Nr. 268)	2026-01-01	§ 1
 `
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
@@ -26,6 +26,20 @@ milog	verordnung	milov5	Fünfte Mindestlohnanpassungsverordnung (BGBl 2025 I Nr.
 	}
 	if got[0].GIISlug != "milov4" || got[1].GIISlug != "milov5" {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestLoadTSV_multiRowRequiresEffectiveFromAndSectionHint(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "linked.tsv")
+	content := `milog	verordnung	milov4	Vierte Mindestlohnanpassungsverordnung (BGBl 2023 I Nr. 321)
+milog	verordnung	milov5	Fünfte Mindestlohnanpassungsverordnung (BGBl 2025 I Nr. 268)
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadTSV(path); err == nil {
+		t.Fatal("expected error when multi-row parent lacks effective_from/section_hint")
 	}
 }
 

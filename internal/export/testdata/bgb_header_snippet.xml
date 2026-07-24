@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dokument SYSTEM "https://www.gesetze-im-internet.de/dtd/1.01/gii-norm.dtd">
+<dokument>
+  <norm builddate="20251013215500" doknr="BJNR001950896BJNE000000377">
+    <metadaten>
+      <jurabk>BGB</jurabk>
+      <jurabk>BGB</jurabk>
+      <langue>Bürgerliches Gesetzbuch</langue>
+      <ausfertigung-datum man="ja">1896-08-18</ausfertigung-datum>
+      <fundstelle>
+        <periodikum>BGBl.</periodikum>
+        <zit>1896 S. 195</zit>
+      </fundstelle>
+      <standangabe>
+        <standtyp>Stand</standtyp>
+        <standkommentar>Zuletzt geändert durch Art. 1 G v. 16.8.2023 BGBl. 2023 I Nr. 217</standkommentar>
+      </standangabe>
+      <eli>http://data.europa.eu/eli/de/1896/sg/195/oj</eli>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P>Inhaltsübersicht</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+
+  <norm builddate="20251013215501" doknr="BJNR001950896BJNE000001377">
+    <metadaten>
+      <jurabk>BGB</jurabk>
+      <gliederungseinheit gliederungskennzahl="000" gliederungsbez="Buch 1" gliederungstitel="Allgemeiner Teil"/>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P>000Buch 1Allgemeiner Teil</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+
+  <norm builddate="20251013215502" doknr="BJNR001950896BJNE000002377">
+    <metadaten>
+      <jurabk>BGB</jurabk>
+      <gliederungseinheit gliederungskennzahl="010" gliederungsbez="Erster Abschnitt" gliederungstitel="Personen"/>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P>010Erster AbschnittPersonen</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+
+  <norm builddate="20251013215503" doknr="BJNR001950896BJNE000003377">
+    <metadaten>
+      <jurabk>BGB</jurabk>
+      <gliederungseinheit gliederungskennzahl="010010" gliederungsbez="Titel 1" gliederungstitel="Personen im Allgemeinen"/>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P>010010Titel 1Personen im Allgemeinen</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+
+  <norm builddate="20251013215504" doknr="BJNR001950896BJNE000004377">
+    <metadaten>
+      <jurabk>BGB</jurabk>
+      <enbez>§ 1</enbez>
+      <titel format="parat">Beginn der Rechtsfähigkeit</titel>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P nr="1">Die Rechtsfähigkeit des Menschen beginnt mit der Vollendung der Geburt.</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+
+  <norm builddate="20251013215505" doknr="BJNR001950896BJNE000005377">
+    <metadaten>
+      <jurabk>BGB</jurabk>
+      <enbez>§ 2</enbez>
+      <titel format="parat">Eintritt der Volljährigkeit</titel>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P nr="1">Die Volljährigkeit tritt mit der Vollendung des 18. Lebensjahres ein.</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+
+  <norm builddate="20251013215506" doknr="BJNR001950896BJNE000006377">
+    <metadaten>
+      <jurabk>BGB</jurabk>
+      <enbez>§ 3</enbez>
+      <titel format="parat">Volljährigkeit; Eheschließung</titel>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P nr="1">Vor Vollendung des 18. Lebensjahres ist nur der Mann volljährig, der eine Ehe schließen darf.</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+
+  <norm builddate="20251013215507" doknr="BJNR001950896BJNE000007377">
+    <metadaten>
+      <jurabk>BGB</jurabk>
+      <enbez>§ 4</enbez>
+      <titel format="parat">Geschäftsfähigkeit</titel>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P nr="1">Wer das siebente Lebensjahr vollendet hat, ist insoweit geschäftsfähig, als er den Einfluss, den eine Willenserklärung oder der Empfang einer solchen auf ihn ausübt, mit geistiger Einsicht und vernünftiger Überlegung beurteilen kann.</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+
+  <norm builddate="20251013215508" doknr="BJNR001950896BJNE000008377">
+    <metadaten>
+      <jurabk>BGB</jurabk>
+      <gliederungseinheit gliederungskennzahl="010020" gliederungsbez="Titel 2" gliederungstitel="Staatsangehörigkeit"/>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P>010020Titel 2Staatsangehörigkeit</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+
+  <norm builddate="20251013215509" doknr="BJNR001950896BJNE000009377">
+    <metadaten>
+      <jurabk>BGB</jurabk>
+      <enbez>§ 5</enbez>
+      <titel format="parat">Rechtsstellung</titel>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P nr="1">Gesetze gelten im Hoheitsgebiet der Bundesrepublik Deutschland, soweit nicht in den Gesetzen selbst etwas anderes bestimmt ist.</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+</dokument>

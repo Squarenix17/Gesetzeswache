@@ -76,7 +76,7 @@ func handle(ctx context.Context, svc *service.Service, req rpcReq) rpcResp {
 		r.Result = map[string]any{
 			"protocolVersion": "2024-11-05",
 			"capabilities":    map[string]any{"tools": map[string]any{}},
-			"serverInfo":      map[string]any{"name": "gesetzeswache", "version": "0.1.0"},
+			"serverInfo":      map[string]any{"name": "gesetzeswache", "version": "0.2.0"},
 		}
 	case "notifications/initialized", "initialized":
 		r.Result = map[string]any{}

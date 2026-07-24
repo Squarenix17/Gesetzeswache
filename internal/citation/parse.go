@@ -2,7 +2,11 @@
 package citation
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +23,15 @@ var (
 	reYearNum  = regexp.MustCompile(`(?i)BGBl\.?\s*(\d{4})\s*([I12])\s*(?:Nr\.?\s*)?([0-9]+[a-zA-Z]?)`)
 	reDate     = regexp.MustCompile(`(\d{1,2})\.(\d{1,2})\.(\d{4})`)
 	reTeilPage = regexp.MustCompile(`(?i)\b([I12])\s+(\d{2,})\b`)
+	// "I Nr. 137" / "II Nr. 42" without BGBl. prefix (year from date when missing).
+	reTeilNr = regexp.MustCompile(`(?i)\b([I12]|II)\s+Nr\.?\s*([0-9]+[a-zA-Z]?)`)
+
+	// Linked instrument: "§ 1 V v. 5.11.2025 I Nr. 268" or "G v. 1.1.2024 I Nr. 1".
+	reLinkedInstrument = regexp.MustCompile(`(?i)(§\s*[0-9]+[a-zA-Z]?\s+)?(G|V|Bek)\.?\s+v\.?\s+(\d{1,2})\.(\d{1,2})\.(\d{4})\s+([I12]|II)\s+Nr\.?\s*([0-9]+[a-zA-Z]?)`)
+	// Stand-style citation without instrument kind: "v. 12.5.2026 I Nr. 137".
+	reStandInstrument = regexp.MustCompile(`(?i)v\.?\s+(\d{1,2})\.(\d{1,2})\.(\d{4})\s+([I12]|II)\s+Nr\.?\s*([0-9]+[a-zA-Z]?)`)
+	// BGBl. year teil nr anywhere in text.
+	reBGBlInline = regexp.MustCompile(`(?i)BGBl\.?\s*(\d{4})\s*([I12])\s*Nr\.?\s*([0-9]+[a-zA-Z]?)`)
 )
 
 // Parse converts a raw Stand string into a structured citation.
@@ -38,6 +51,9 @@ func Parse(lawID, raw string) domain.StandCitation {
 		out.ParseOK = out.Year > 0 && out.Teil > 0 && out.Number != ""
 		if out.ParseOK {
 			attachDate(&out, raw)
+			if m2 := reLinkedInstrument.FindStringSubmatch(raw); len(m2) >= 3 {
+				out.InstrumentKind = strings.ToUpper(strings.TrimSuffix(m2[2], "."))
+			}
 			return out
 		}
 	}
@@ -57,19 +73,31 @@ func Parse(lawID, raw string) domain.StandCitation {
 		}
 	}
 
-	if out.Teil == 0 || out.Year == 0 {
+	if out.Teil == 0 || out.Year == 0 || out.Number == "" {
 		if m := reTeilPage.FindStringSubmatch(raw); len(m) == 3 {
-			out.Teil = teilFrom(m[1])
-			out.Page = m[2]
-			if out.Year == 0 {
-				if dm := reDate.FindStringSubmatch(raw); len(dm) == 4 {
-					out.Year, _ = strconv.Atoi(dm[3])
-				}
+			if out.Teil == 0 {
+				out.Teil = teilFrom(m[1])
+			}
+			if out.Page == "" {
+				out.Page = m[2]
 			}
 		}
 	}
 
 	attachDate(&out, raw)
+
+	if out.Number == "" {
+		if m := reTeilNr.FindStringSubmatch(raw); len(m) == 3 {
+			if out.Teil == 0 {
+				out.Teil = teilFrom(m[1])
+			}
+			out.Number = m[2]
+		}
+	}
+
+	if m := reLinkedInstrument.FindStringSubmatch(raw); len(m) >= 3 {
+		out.InstrumentKind = strings.ToUpper(strings.TrimSuffix(m[2], "."))
+	}
 
 	// Comparable enough if we have year + (number or page) + teil
 	out.ParseOK = out.Year > 0 && out.Teil > 0 && (out.Number != "" || out.Page != "")
@@ -107,6 +135,114 @@ func attachDate(out *domain.StandCitation, raw string) {
 			out.Year = y
 		}
 	}
+}
+
+// ParseLinkedInstruments finds all BGBl-like citations in Stand or +++ editorial text.
+func ParseLinkedInstruments(raw string) []domain.InstrumentRef {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+
+	var refs []domain.InstrumentRef
+	seen := make(map[string]struct{})
+
+	add := func(ref domain.InstrumentRef) {
+		key := fmt.Sprintf("%s|%d|%d|%s|%s", ref.Kind, ref.Teil, ref.Year, ref.Number, ref.SectionHint)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		refs = append(refs, ref)
+	}
+
+	for _, m := range reLinkedInstrument.FindAllStringSubmatch(raw, -1) {
+		year, _ := strconv.Atoi(m[5])
+		sectionHint := ""
+		if m[1] != "" {
+			sectionHint = strings.TrimSpace(m[1])
+		}
+		add(domain.InstrumentRef{
+			Kind:        strings.ToUpper(strings.TrimSuffix(m[2], ".")),
+			Year:        year,
+			Teil:        teilFrom(m[6]),
+			Number:      m[7],
+			SectionHint: sectionHint,
+			Raw:         m[0],
+		})
+	}
+
+	for _, m := range reBGBlInline.FindAllStringSubmatch(raw, -1) {
+		year, _ := strconv.Atoi(m[1])
+		add(domain.InstrumentRef{
+			Year:   year,
+			Teil:   teilFrom(m[2]),
+			Number: m[3],
+			Raw:    m[0],
+		})
+	}
+
+	for _, m := range reStandInstrument.FindAllStringSubmatch(raw, -1) {
+		year, _ := strconv.Atoi(m[3])
+		candidate := domain.InstrumentRef{
+			Year:   year,
+			Teil:   teilFrom(m[4]),
+			Number: m[5],
+			Raw:    m[0],
+		}
+		if isSubsumedByExisting(candidate.Raw, refs) {
+			continue
+		}
+		add(candidate)
+	}
+
+	return refs
+}
+
+func isSubsumedByExisting(raw string, refs []domain.InstrumentRef) bool {
+	for _, ref := range refs {
+		if raw != ref.Raw && strings.Contains(ref.Raw, raw) {
+			return true
+		}
+	}
+	return false
+}
+
+// FingerprintInstruments returns a stable SHA-256 hex digest of kind/teil/year/number tuples.
+func FingerprintInstruments(refs []domain.InstrumentRef) string {
+	if len(refs) == 0 {
+		return ""
+	}
+
+	sorted := make([]domain.InstrumentRef, len(refs))
+	copy(sorted, refs)
+	sort.Slice(sorted, func(i, j int) bool {
+		a, b := sorted[i], sorted[j]
+		if a.Kind != b.Kind {
+			return a.Kind < b.Kind
+		}
+		if a.Teil != b.Teil {
+			return a.Teil < b.Teil
+		}
+		if a.Year != b.Year {
+			return a.Year < b.Year
+		}
+		if a.Number != b.Number {
+			return a.Number < b.Number
+		}
+		return a.SectionHint < b.SectionHint
+	})
+
+	var b strings.Builder
+	for i, ref := range sorted {
+		if i > 0 {
+			b.WriteByte(';')
+		}
+		fmt.Fprintf(&b, "%s|%d|%d|%s", ref.Kind, ref.Teil, ref.Year, ref.Number)
+	}
+
+	sum := sha256.Sum256([]byte(b.String()))
+	return hex.EncodeToString(sum[:])
 }
 
 // Compare returns -1 if a is older than b, 0 if equal/incomparable, 1 if a is newer.

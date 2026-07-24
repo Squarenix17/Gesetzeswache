@@ -77,7 +77,7 @@ REST and CLI wrap payloads in a JSON envelope:
 Any client: RAG pipeline, search index, agent tool, or application, must treat freshness as part of the API contract:
 
 1. **Always read freshness on matched results**, resolve/export: `data.freshness.state`; `GET /v1/freshness`: `data.state`
-2. **Embed or serve as current only when** state is `confirmed_current`
+2. **Embed or serve as current only when** state is `confirmed_current`, confidence is high, and Stand `parse_ok` is true (amendment-by-reference laws may otherwise look current while a linked Verordnung moved)
 3. **Quarantine or flag for manual review** when state is `confirmed_stale` or `uncertain`
 4. **Never index or serve law text while ignoring freshness metadata**
 
@@ -95,6 +95,7 @@ Optional: set `GEW_REFUSE_EXPORT_STALE=true` so the server rejects export for `c
 |--------|------|-------|
 | GET | `/healthz` | Liveness |
 | GET | `/readyz` | Readiness (sync initialized) |
+| GET | `/metrics` | Prometheus text metrics (unauthenticated) |
 | GET, POST | `/v1/resolve?q=` | Resolve law + freshness |
 | GET | `/v1/freshness?id=` | Freshness for a known ID (or `q=`) |
 | GET | `/v1/stale` | List `confirmed_stale` laws |
@@ -106,6 +107,7 @@ Optional: set `GEW_REFUSE_EXPORT_STALE=true` so the server rejects export for `c
 curl 'http://127.0.0.1:8080/v1/resolve?q=BGB'
 curl 'http://127.0.0.1:8080/v1/export?q=BGB&format=hierarchical'
 curl 'http://127.0.0.1:8080/v1/sync/status'
+curl -s 'http://127.0.0.1:8080/metrics' | head
 ```
 
 ### CLI
@@ -228,7 +230,7 @@ docker run --rm -p 8080:8080 -v gew-data:/tmp ghcr.io/squarenix17/gesetzeswache:
 - [x] Export format quality (`kind` / `section_ref` / `normtext` for RAG)
 - [x] Integration tests with mocked GII/BGBl fixtures
 - [x] Bulk Stand refresh for full catalog
-- [ ] Metrics / observability endpoints
+- [x] Metrics / observability endpoints
 
 See the [open issues](https://github.com/Squarenix17/gesetzeswache/issues) for proposed features and known issues.
 

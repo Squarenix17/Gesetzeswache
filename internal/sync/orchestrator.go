@@ -21,6 +21,8 @@ import (
 	"github.com/Squarenix17/gesetzeswache/internal/freshness"
 	"github.com/Squarenix17/gesetzeswache/internal/giiurl"
 	"github.com/Squarenix17/gesetzeswache/internal/httpx"
+	"github.com/Squarenix17/gesetzeswache/internal/instruments"
+	"github.com/Squarenix17/gesetzeswache/internal/metrics"
 	"github.com/Squarenix17/gesetzeswache/internal/normalize"
 	"github.com/Squarenix17/gesetzeswache/internal/search"
 	"github.com/Squarenix17/gesetzeswache/internal/store"
@@ -28,11 +30,13 @@ import (
 
 // Orchestrator runs independent sync jobs.
 type Orchestrator struct {
-	CFG    config.Config
-	Store  *store.Store
-	HTTP   *httpx.Client
-	Search *search.Engine
-	Log    *slog.Logger
+	CFG         config.Config
+	Store       *store.Store
+	HTTP        *httpx.Client
+	Search      *search.Engine
+	Log         *slog.Logger
+	Metrics     *metrics.Registry
+	Instruments *instruments.Catalog
 }
 
 type tocItem struct {
@@ -55,6 +59,7 @@ func (o *Orchestrator) RunTOC(ctx context.Context) error {
 	defer func() {
 		a.EndedAt = time.Now().UTC()
 		_ = o.Store.AppendSyncAttempt(a)
+		o.recordSyncJob(a)
 	}()
 	if err != nil {
 		a.Error = err.Error()
@@ -153,6 +158,7 @@ func (o *Orchestrator) RunGIIFeed(ctx context.Context) error {
 	defer func() {
 		a.EndedAt = time.Now().UTC()
 		_ = o.Store.AppendSyncAttempt(a)
+		o.recordSyncJob(a)
 	}()
 	body, _, status, err := o.HTTP.Get(ctx, o.CFG.GIIFeedURL, "", "")
 	if err != nil {
@@ -225,6 +231,7 @@ func (o *Orchestrator) RunBGBlFeeds(ctx context.Context) error {
 	defer func() {
 		a.EndedAt = time.Now().UTC()
 		_ = o.Store.AppendSyncAttempt(a)
+		o.recordSyncJob(a)
 	}()
 	count := 0
 	for _, url := range []string{o.CFG.BGBlFeed1URL, o.CFG.BGBlFeed2URL} {
@@ -295,6 +302,7 @@ func (o *Orchestrator) RunELIProbe(ctx context.Context) error {
 	defer func() {
 		a.EndedAt = time.Now().UTC()
 		_ = o.Store.AppendSyncAttempt(a)
+		o.recordSyncJob(a)
 	}()
 	year := time.Now().UTC().Year()
 	found := 0
@@ -338,6 +346,17 @@ func (o *Orchestrator) RunELIProbe(ctx context.Context) error {
 	a.Success = true
 	a.Detail = fmt.Sprintf("probed hits %d", found)
 	return nil
+}
+
+func (o *Orchestrator) recordSyncJob(a domain.SyncAttempt) {
+	result := "error"
+	if a.Success {
+		result = "success"
+	}
+	_ = o.Metrics.IncCounter(metrics.MetricSyncJobsTotal, map[string]string{
+		"source": a.Source,
+		"result": result,
+	}, 1)
 }
 
 func latestNumber(st *store.Store, teil, year int) int {
@@ -399,21 +418,27 @@ func (o *Orchestrator) Reconcile(ctx context.Context) error {
 		stand, _, _ := o.Store.GetStand(law.ID)
 		links, _ := o.Store.LinksForLaw(law.ID)
 		var issues []domain.GazetteIssue
+		classes := map[string]domain.LinkClass{}
 		for _, l := range links {
+			classes[l.IssueID] = l.Class
 			if iss, ok, _ := o.Store.GetIssue(l.IssueID); ok {
 				issues = append(issues, iss)
 			}
 		}
+		instrRefs, instrIssues := instruments.CollectEvidence(o.Store, o.Instruments, law.ID, stand)
 		rec := freshness.Evaluate(freshness.Input{
-			LawID:             law.ID,
-			Stand:             stand,
-			LinkedIssues:      issues,
-			LastTOCSuccess:    tocT,
+			LawID:              law.ID,
+			Stand:              stand,
+			LinkedIssues:       issues,
+			LinkClasses:        classes,
+			InstrumentRefs:     instrRefs,
+			InstrumentIssues:   instrIssues,
+			LastTOCSuccess:     tocT,
 			LastGIIFeedSuccess: giiT,
-			LastBGBlSuccess:   bgblSuccess,
-			BGBlFromProbeOnly: probeOnly,
-			Now:               now,
-			MaxAge:            o.CFG.FreshnessMaxAge,
+			LastBGBlSuccess:    bgblSuccess,
+			BGBlFromProbeOnly:  probeOnly,
+			Now:                now,
+			MaxAge:             o.CFG.FreshnessMaxAge,
 		})
 		_ = o.Store.PutFreshness(rec)
 	}
@@ -468,19 +493,49 @@ func (o *Orchestrator) RefreshStandForLaw(ctx context.Context, law domain.Law) e
 		return fmt.Errorf("stand fetch status %d", status)
 	}
 	raw := extractStand(string(body))
+	var xmlData []byte
 	if raw == "" {
-		xmlData, xerr := o.fetchLawXML(ctx, law)
+		var xerr error
+		xmlData, xerr = o.fetchLawXML(ctx, law)
 		if xerr != nil {
 			o.Log.Debug("stand xml fallback failed", "law", law.ID, "err", xerr)
 			return nil
 		}
 		raw = export.ExtractStandRaw(xmlData)
 	}
-	if raw == "" {
+	if raw == "" && xmlData == nil {
 		return nil
 	}
-	c := citation.Parse(law.ID, raw)
-	return o.Store.UpsertStand(c)
+	if raw != "" {
+		c := citation.Parse(law.ID, raw)
+		if err := o.Store.UpsertStand(c); err != nil {
+			return err
+		}
+	}
+	// Persist +++ instrument citations from XML when available.
+	if xmlData == nil {
+		if xd, xerr := o.fetchLawXML(ctx, law); xerr == nil {
+			xmlData = xd
+		}
+	}
+	if len(xmlData) > 0 {
+		ir, err := export.BuildIR(law, "instruments", xmlData)
+		if err == nil {
+			texts := export.EditorialCitationTexts(ir)
+			refs := export.InstrumentRefsFromIR(ir)
+			if len(texts) > 0 {
+				if err := o.Store.SetMeta("editorial:"+law.ID, strings.Join(texts, "\n")); err != nil && o.Log != nil {
+					o.Log.Warn("persist editorial", "law", law.ID, "err", err)
+				}
+			}
+			if len(refs) > 0 {
+				if err := o.Store.SetMeta("editorial_fp:"+law.ID, citation.FingerprintInstruments(refs)); err != nil && o.Log != nil {
+					o.Log.Warn("persist editorial fingerprint", "law", law.ID, "err", err)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // RefreshMissingStands refreshes Stand for up to max laws that have no stored Stand citation.

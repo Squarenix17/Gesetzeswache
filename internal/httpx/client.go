@@ -3,6 +3,7 @@ package httpx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Squarenix17/gesetzeswache/internal/metrics"
 )
 
 // Client wraps http.Client with per-host rate limiting, size caps, and SSRF controls.
@@ -21,6 +24,7 @@ type Client struct {
 	allowed  map[string]struct{}
 	mu       sync.Mutex
 	last     map[string]time.Time
+	Metrics  *metrics.Registry
 }
 
 func New(timeout time.Duration, minGap time.Duration, maxBytes int64, allowHosts ...string) *Client {
@@ -103,6 +107,9 @@ func (c *Client) Get(ctx context.Context, rawURL, etag, modSince string) (body [
 	if err := c.validateURL(u); err != nil {
 		return nil, "", 0, err
 	}
+	host := strings.ToLower(u.Hostname())
+	defer func() { c.recordOutbound(host, status, err) }()
+
 	// Prefer https for allowlisted government hosts
 	if u.Scheme == "http" {
 		u.Scheme = "https"
@@ -115,7 +122,7 @@ func (c *Client) Get(ctx context.Context, rawURL, etag, modSince string) (body [
 	if err != nil {
 		return nil, "", 0, err
 	}
-	req.Header.Set("User-Agent", "gew/0.1 (+https://github.com/Squarenix17/gesetzeswache)")
+	req.Header.Set("User-Agent", "gew/0.2.0 (+https://github.com/Squarenix17/gesetzeswache)")
 	if etag != "" {
 		req.Header.Set("If-None-Match", etag)
 	}
@@ -142,6 +149,34 @@ func (c *Client) Get(ctx context.Context, rawURL, etag, modSince string) (body [
 		return nil, "", resp.StatusCode, fmt.Errorf("response exceeds size cap")
 	}
 	return data, resp.Header.Get("ETag"), resp.StatusCode, nil
+}
+
+func (c *Client) recordOutbound(host string, status int, err error) {
+	if host == "" {
+		return
+	}
+	result := "success"
+	switch {
+	case err != nil && isTimeout(err):
+		result = "timeout"
+	case err != nil || status >= 400:
+		result = "error"
+	}
+	_ = c.Metrics.IncCounter(metrics.MetricOutboundHTTP, map[string]string{
+		"host":   host,
+		"result": result,
+	}, 1)
+}
+
+func isTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
 }
 
 // Exists probes URL existence via GET (HEAD is unreliable on some gov hosts).

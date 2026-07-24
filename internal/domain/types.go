@@ -46,17 +46,36 @@ type LawVariant struct {
 	LawID   string `json:"law_id"`
 }
 
+// InstrumentRef is a BGBl citation extracted from Stand or +++ editorial notes.
+type InstrumentRef struct {
+	Kind        string `json:"kind,omitempty"` // G|V|Bek|""
+	Teil        int    `json:"teil,omitempty"`
+	Year        int    `json:"year,omitempty"`
+	Number      string `json:"number,omitempty"`
+	SectionHint string `json:"section_hint,omitempty"` // e.g. "§ 1"
+	Raw         string `json:"raw,omitempty"`
+}
+
+// LinkedInstrument maps a parent law to a related ordinance/instrument (seeded TSV).
+type LinkedInstrument struct {
+	ParentLawID string `json:"parent_law_id"`
+	Kind        string `json:"kind"` // verordnung|gesetz|…
+	GIISlug     string `json:"gii_slug"`
+	Notes       string `json:"notes,omitempty"`
+}
+
 // StandCitation is the GII "Stand" signal, raw and parsed.
 type StandCitation struct {
-	LawID      string     `json:"law_id"`
-	Raw        string     `json:"raw"`
-	Teil       int        `json:"teil,omitempty"` // 1 or 2
-	Year       int        `json:"year,omitempty"`
-	Number     string     `json:"number,omitempty"` // issue number, may include letter suffix
-	Page       string     `json:"page,omitempty"`
-	Date       *time.Time `json:"date,omitempty"`
-	ParseOK    bool       `json:"parse_ok"`
-	ParseNotes string     `json:"parse_notes,omitempty"`
+	LawID          string     `json:"law_id"`
+	Raw            string     `json:"raw"`
+	Teil           int        `json:"teil,omitempty"` // 1 or 2
+	Year           int        `json:"year,omitempty"`
+	Number         string     `json:"number,omitempty"` // issue number, may include letter suffix
+	Page           string     `json:"page,omitempty"`
+	Date           *time.Time `json:"date,omitempty"`
+	InstrumentKind string     `json:"instrument_kind,omitempty"` // G|V|Bek from Stand text
+	ParseOK        bool       `json:"parse_ok"`
+	ParseNotes     string     `json:"parse_notes,omitempty"`
 }
 
 // GazetteIssue is an observed BGBl promulgation.

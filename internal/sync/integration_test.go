@@ -14,6 +14,7 @@ import (
 	"github.com/Squarenix17/gesetzeswache/internal/domain"
 	"github.com/Squarenix17/gesetzeswache/internal/giiurl"
 	"github.com/Squarenix17/gesetzeswache/internal/httpx"
+	"github.com/Squarenix17/gesetzeswache/internal/metrics"
 	"github.com/Squarenix17/gesetzeswache/internal/search"
 	"github.com/Squarenix17/gesetzeswache/internal/store"
 	"github.com/Squarenix17/gesetzeswache/internal/test/fixtures"
@@ -71,6 +72,48 @@ func newTestOrchestrator(t *testing.T, mt *httpmock.Transport) *Orchestrator {
 		HTTP:   httpClient,
 		Search: eng,
 		Log:    log,
+	}
+}
+
+func TestIntegration_RunTOC_recordsSyncJobMetric(t *testing.T) {
+	mt := httpmock.New()
+	mt.SetBytes("www.gesetze-im-internet.de", "/gii-toc.xml", fixtures.MustRead("gii_toc.xml"))
+	reg := metrics.NewRegistry()
+	o := newTestOrchestrator(t, mt)
+	o.Metrics = reg
+	o.HTTP.Metrics = reg
+
+	if err := o.RunTOC(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := reg.CounterValue(metrics.MetricSyncJobsTotal, map[string]string{
+		"source": "toc",
+		"result": "success",
+	})
+	if got != 1 {
+		t.Fatalf("toc success jobs=%v want 1", got)
+	}
+}
+
+func TestIntegration_RunTOC_failureMetric(t *testing.T) {
+	mt := httpmock.New()
+	mt.Set("www.gesetze-im-internet.de", "/gii-toc.xml", httpmock.Response{
+		Err: fmt.Errorf("dial timeout"),
+	})
+	reg := metrics.NewRegistry()
+	o := newTestOrchestrator(t, mt)
+	o.Metrics = reg
+	o.HTTP.Metrics = reg
+
+	if err := o.RunTOC(context.Background()); err == nil {
+		t.Fatal("expected TOC failure")
+	}
+	got := reg.CounterValue(metrics.MetricSyncJobsTotal, map[string]string{
+		"source": "toc",
+		"result": "error",
+	})
+	if got != 1 {
+		t.Fatalf("toc error jobs=%v want 1", got)
 	}
 }
 

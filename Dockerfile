@@ -12,6 +12,7 @@ WORKDIR /
 COPY --from=build /out/gew /gew
 COPY variants /variants
 ENV GEW_VARIANTS_PATH=/variants/variants.tsv
+ENV GEW_LINKED_INSTRUMENTS_PATH=/variants/linked_instruments.tsv
 ENV GEW_STORE_PATH=/tmp/gesetzeswache.db
 EXPOSE 8080
 USER nonroot:nonroot

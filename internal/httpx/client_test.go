@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Squarenix17/gesetzeswache/internal/metrics"
 	"github.com/Squarenix17/gesetzeswache/internal/test/httpmock"
 )
 
@@ -24,6 +25,89 @@ func TestGetAllowlistedMock(t *testing.T) {
 	}
 	if string(body) != `<items></items>` {
 		t.Fatalf("body %q", body)
+	}
+}
+
+func TestGetRecordsOutboundMetrics(t *testing.T) {
+	mt := httpmock.New()
+	mt.SetBytes("www.gesetze-im-internet.de", "/gii-toc.xml", []byte(`<items></items>`))
+	reg := metrics.NewRegistry()
+	c := NewWithTransport(5*time.Second, time.Millisecond, 1<<20, mt)
+	c.Metrics = reg
+
+	_, _, _, err := c.Get(context.Background(), "https://www.gesetze-im-internet.de/gii-toc.xml", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := reg.CounterValue(metrics.MetricOutboundHTTP, map[string]string{
+		"host":   "www.gesetze-im-internet.de",
+		"result": "success",
+	})
+	if got != 1 {
+		t.Fatalf("success counter=%v want 1", got)
+	}
+
+	mt.Set("www.recht.bund.de", "/rss/feeds/rss_bgbl-1.xml", httpmock.Response{
+		Err: fmt.Errorf("simulated TLS timeout"),
+	})
+	_, _, _, err = c.Get(context.Background(), "https://www.recht.bund.de/rss/feeds/rss_bgbl-1.xml", "", "")
+	if err == nil {
+		t.Fatal("expected transport error")
+	}
+	gotErr := reg.CounterValue(metrics.MetricOutboundHTTP, map[string]string{
+		"host":   "www.recht.bund.de",
+		"result": "error",
+	})
+	if gotErr != 1 {
+		t.Fatalf("error counter=%v want 1", gotErr)
+	}
+}
+
+func TestGetRecordsHTTPStatusErrorMetrics(t *testing.T) {
+	mt := httpmock.New()
+	mt.Set("www.gesetze-im-internet.de", "/missing", httpmock.Response{
+		Status: http.StatusNotFound,
+		Body:   []byte("nope"),
+	})
+	reg := metrics.NewRegistry()
+	c := NewWithTransport(5*time.Second, time.Millisecond, 1<<20, mt)
+	c.Metrics = reg
+
+	_, _, status, err := c.Get(context.Background(), "https://www.gesetze-im-internet.de/missing", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != 404 {
+		t.Fatalf("status=%d", status)
+	}
+	got := reg.CounterValue(metrics.MetricOutboundHTTP, map[string]string{
+		"host":   "www.gesetze-im-internet.de",
+		"result": "error",
+	})
+	if got != 1 {
+		t.Fatalf("http error counter=%v want 1", got)
+	}
+}
+
+func TestGetRecordsTimeoutMetrics(t *testing.T) {
+	mt := httpmock.New()
+	mt.Set("www.gesetze-im-internet.de", "/slow", httpmock.Response{
+		Err: context.DeadlineExceeded,
+	})
+	reg := metrics.NewRegistry()
+	c := NewWithTransport(5*time.Second, time.Millisecond, 1<<20, mt)
+	c.Metrics = reg
+
+	_, _, _, err := c.Get(context.Background(), "https://www.gesetze-im-internet.de/slow", "", "")
+	if err == nil {
+		t.Fatal("expected timeout")
+	}
+	got := reg.CounterValue(metrics.MetricOutboundHTTP, map[string]string{
+		"host":   "www.gesetze-im-internet.de",
+		"result": "timeout",
+	})
+	if got != 1 {
+		t.Fatalf("timeout counter=%v want 1", got)
 	}
 }
 

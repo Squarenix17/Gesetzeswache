@@ -2,9 +2,12 @@
 package sync
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/xml"
 	"fmt"
+	"io"
 	"log/slog"
 	"regexp"
 	"strconv"
@@ -14,6 +17,7 @@ import (
 	"github.com/Squarenix17/gesetzeswache/internal/citation"
 	"github.com/Squarenix17/gesetzeswache/internal/config"
 	"github.com/Squarenix17/gesetzeswache/internal/domain"
+	"github.com/Squarenix17/gesetzeswache/internal/export"
 	"github.com/Squarenix17/gesetzeswache/internal/freshness"
 	"github.com/Squarenix17/gesetzeswache/internal/giiurl"
 	"github.com/Squarenix17/gesetzeswache/internal/httpx"
@@ -446,7 +450,8 @@ func (o *Orchestrator) heuristicLink(now time.Time) {
 	}
 }
 
-// RefreshStandForLaw fetches a law HTML page for Stand — URLs are always rebuilt from config base + validated slug.
+// RefreshStandForLaw fetches Stand from the law HTML index page; if absent, falls back to
+// standangabe in the GII export XML. URLs are always rebuilt from config base + validated slug.
 func (o *Orchestrator) RefreshStandForLaw(ctx context.Context, law domain.Law) error {
 	if law.GIIPath == "" {
 		return nil
@@ -464,10 +469,84 @@ func (o *Orchestrator) RefreshStandForLaw(ctx context.Context, law domain.Law) e
 	}
 	raw := extractStand(string(body))
 	if raw == "" {
+		xmlData, xerr := o.fetchLawXML(ctx, law)
+		if xerr != nil {
+			o.Log.Debug("stand xml fallback failed", "law", law.ID, "err", xerr)
+			return nil
+		}
+		raw = export.ExtractStandRaw(xmlData)
+	}
+	if raw == "" {
 		return nil
 	}
 	c := citation.Parse(law.ID, raw)
 	return o.Store.UpsertStand(c)
+}
+
+// RefreshMissingStands refreshes Stand for up to max laws that have no stored Stand citation.
+// max <= 0 skips the bulk pass (startup stays cheap).
+func (o *Orchestrator) RefreshMissingStands(ctx context.Context, max int) (int, error) {
+	if max <= 0 {
+		return 0, nil
+	}
+	laws, err := o.Store.ListLaws()
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, law := range laws {
+		if n >= max {
+			break
+		}
+		if _, ok, _ := o.Store.GetStand(law.ID); ok {
+			continue
+		}
+		if err := o.RefreshStandForLaw(ctx, law); err != nil {
+			o.Log.Warn("stand refresh", "law", law.ID, "err", err)
+			continue
+		}
+		if _, ok, _ := o.Store.GetStand(law.ID); ok {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (o *Orchestrator) fetchLawXML(ctx context.Context, law domain.Law) ([]byte, error) {
+	url, err := giiurl.XMLZip(o.CFG.GIIBase, law.GIIPath)
+	if err != nil {
+		return nil, err
+	}
+	body, _, status, err := o.HTTP.Get(ctx, url, "", "")
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return nil, fmt.Errorf("xml.zip status %d", status)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		if bytes.Contains(body, []byte("<")) {
+			return body, nil
+		}
+		return nil, err
+	}
+	for _, f := range zr.File {
+		if !strings.HasSuffix(strings.ToLower(f.Name), ".xml") {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			continue
+		}
+		data, err := io.ReadAll(io.LimitReader(rc, 16<<20))
+		rc.Close()
+		if err != nil {
+			continue
+		}
+		return data, nil
+	}
+	return nil, fmt.Errorf("no xml in zip")
 }
 
 var reStandHTML = regexp.MustCompile(`(?is)Stand[^:<]{0,40}:?\s*</[^>]+>\s*([^<]{5,200})`)
@@ -592,7 +671,11 @@ func (o *Orchestrator) loop(ctx context.Context, every time.Duration, fn func(co
 // InitialSync runs catalog + feeds once at startup (best effort).
 func (o *Orchestrator) InitialSync(ctx context.Context) {
 	_ = o.RunTOC(ctx)
-	// light stand refresh for first N laws is expensive; skip bulk in v1 — Stand filled on demand / partial
+	if n, err := o.RefreshMissingStands(ctx, o.CFG.StandRefreshMax); err != nil {
+		o.Log.Warn("initial stand refresh", "err", err)
+	} else if n > 0 {
+		o.Log.Info("initial stand refresh", "filled", n, "max", o.CFG.StandRefreshMax)
+	}
 	_ = o.RunGIIFeed(ctx)
 	if err := o.RunBGBlFeeds(ctx); err != nil {
 		o.Log.Warn("initial bgbl feed failed, will rely on eli probe", "err", err)

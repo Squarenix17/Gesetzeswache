@@ -124,7 +124,7 @@ func tools() []map[string]any {
 			"id": map[string]any{"type": "string"},
 		}, nil),
 		tool("sync_status", "Sync and freshness readiness status", map[string]any{}, nil),
-		tool("export_law_text", "Export law text in RAG-ready formats (hierarchical|chunked|flat)", map[string]any{
+		tool("export_law_text", "Export law text in RAG-ready formats (hierarchical|chunked|flat|normtext)", map[string]any{
 			"query":   map[string]any{"type": "string"},
 			"formats": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 		}, []string{"query"}),

@@ -2,3 +2,7 @@
 # law_id should match normalized abbreviation key used in the catalog (e.g. bgb).
 Zivilgesetzbuch	bgb
 Civil Code	bgb
+SGB XI	sgb11
+SGB 11	sgb11
+SGB II	sgb2
+MuSchG	muschg2018

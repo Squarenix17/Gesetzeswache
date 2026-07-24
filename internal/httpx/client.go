@@ -24,6 +24,14 @@ type Client struct {
 }
 
 func New(timeout time.Duration, minGap time.Duration, maxBytes int64, allowHosts ...string) *Client {
+	return NewWithTransport(timeout, minGap, maxBytes, nil, allowHosts...)
+}
+
+// NewWithTransport is like New but uses rt as the underlying RoundTripper when non-nil.
+// Production callers pass nil (default transport). Tests inject a path-routed mock that
+// never dials the network while still exercising allowlisting and SSRF checks.
+// Injected transports must honor the validated req.URL destination and must not dial elsewhere.
+func NewWithTransport(timeout time.Duration, minGap time.Duration, maxBytes int64, rt http.RoundTripper, allowHosts ...string) *Client {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
@@ -53,7 +61,8 @@ func New(timeout time.Duration, minGap time.Duration, maxBytes int64, allowHosts
 		last:     map[string]time.Time{},
 	}
 	c.hc = &http.Client{
-		Timeout: timeout,
+		Timeout:   timeout,
+		Transport: rt,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
 				return fmt.Errorf("too many redirects")
@@ -115,6 +124,9 @@ func (c *Client) Get(ctx context.Context, rawURL, etag, modSince string) (body [
 	}
 	resp, err := c.hc.Do(req)
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		return nil, "", 0, err
 	}
 	defer resp.Body.Close()

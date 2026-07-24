@@ -1,9 +1,14 @@
 services:
   gew:
-    image: ghcr.io/squarenix17/gesetzeswache:latest
+    build: .
+    image: gesetzeswache:local
     container_name: gew
     ports:
-      - "8080:8080"
+      - "18081:8080"
+    environment:
+      GEW_SHARED_SECRET: ${GEW_SHARED_SECRET:-change-me}
+      GEW_DISCOVERY_ENABLED: "true"
+      GEW_DISCOVERY_MAX_PER_CYCLE: "50"
     volumes:
       - gew-data:/tmp
     restart: unless-stopped

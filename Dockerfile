@@ -14,6 +14,9 @@ COPY variants /variants
 ENV GEW_VARIANTS_PATH=/variants/variants.tsv
 ENV GEW_LINKED_INSTRUMENTS_PATH=/variants/linked_instruments.tsv
 ENV GEW_STORE_PATH=/tmp/gesetzeswache.db
+ENV GEW_DISCOVERY_ENABLED=true
+ENV GEW_DISCOVERY_MAX_PER_CYCLE=50
+ENV GEW_HTTP_ADDR=:8080
 EXPOSE 8080
 USER nonroot:nonroot
 ENTRYPOINT ["/gew"]

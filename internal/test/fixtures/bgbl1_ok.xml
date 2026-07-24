@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+<channel>
+<title>recht.bund.de – BGBl Teil I</title>
+<link>https://www.recht.bund.de</link>
+<description>Offizieller Teil I Feed</description>
+<item>
+<title>BGBl. I 2026 Nr. 100 – Beispielgesetz</title>
+<link>https://www.recht.bund.de/eli/bund/bgbl-1/2026/100</link>
+<description>Veröffentlichung im Bundesgesetzblatt Teil I</description>
+<guid isPermaLink="true">https://www.recht.bund.de/eli/bund/bgbl-1/2026/100</guid>
+<pubDate>Fri, 24 Jul 2026 10:00:00 +0200</pubDate>
+</item>
+</channel>
+</rss>

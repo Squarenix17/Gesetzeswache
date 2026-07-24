@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dokument SYSTEM "https://www.gesetze-im-internet.de/dtd/1.01/gii-norm.dtd">
+<dokument>
+  <norm builddate="20240115120000" doknr="BJNR001950894BJNE000100377">
+    <metadaten>
+      <jurabk>ArbZG</jurabk>
+      <jurabk>ArbZG</jurabk>
+      <langue>Arbeitszeitgesetz</langue>
+      <ausfertigung-datum man="ja">1994-06-06</ausfertigung-datum>
+      <fundstelle>
+        <periodikum>BGBl. I</periodikum>
+        <zit>1994 S. 1170, 1171</zit>
+      </fundstelle>
+      <standangabe>
+        <standtyp>Stand</standtyp>
+        <standkommentar>Zuletzt geändert durch Art. 1 G v. 20.7.2022 BGBl. I S. 1170</standkommentar>
+      </standangabe>
+      <eli>http://data.europa.eu/eli/de/1994/sg/1170/oj</eli>
+      <metangabe>(+++ Textnachweis der Geltung des § 16 Abs. 2: 1.1.2024 +++)</metangabe>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P>ArbZG</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+
+  <norm builddate="20240115120001" doknr="BJNR001950894BJNE000101377">
+    <metadaten>
+      <jurabk>ArbZG</jurabk>
+      <gliederungseinheit gliederungskennzahl="010" gliederungsbez="Erster Abschnitt" gliederungstitel="Allgemeine Vorschriften"/>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P>010Erster AbschnittAllgemeine Vorschriften</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+
+  <norm builddate="20240115120002" doknr="BJNR001950894BJNE000102377">
+    <metadaten>
+      <jurabk>ArbZG</jurabk>
+      <enbez>§ 1</enbez>
+      <titel format="parat">Zweck</titel>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P nr="1">Zweck des Gesetzes ist es, die Sicherheit und den Gesundheitsschutz der Arbeitnehmer in der Bundesrepublik Deutschland bei der Arbeitszeitgestaltung zu gewährleisten und die Grenzen der Belastbarkeit der Arbeitnehmer zu erkennen und einzuhalten.</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+
+  <norm builddate="20240115120003" doknr="BJNR001950894BJNE000103377">
+    <metadaten>
+      <jurabk>ArbZG</jurabk>
+      <enbez>§ 2</enbez>
+      <titel format="parat">Arbeitszeit der Arbeitnehmer</titel>
+    </metadaten>
+    <textdaten>
+      ArbZG
+      <text>
+        <content>
+          <P nr="1">Die werktägliche Arbeitszeit der Arbeitnehmer darf acht Stunden nicht überschreiten.</P>
+          <P nr="2">Die Arbeitszeit kann auf bis zu zehn Stunden nur verlängert werden, wenn innerhalb von sechs Kalendermonaten oder innerhalb von 24 Wochen im Durchschnitt acht Stunden werktäglich nicht überschritten werden.</P>
+          <P nr="3">Die Arbeitszeit der Schicht- und Bereitschaftsarbeitnehmer darf zwölf Stunden nicht überschreiten.</P>
+          <P nr="4">Als werktägliche Arbeitszeit gilt die Zeit vom Beginn bis zum Ende der Arbeit einschließlich der in der Betriebsstätte verbrachten Arbeitsbereitschaftszeit, jedoch ohne die Ruhepausen.</P>
+          <P nr="5">Ruhepausen, die mindestens 15 Minuten betragen, sind im Voraus festzusetzen und dürfen nicht unmittelbar vor Arbeitsbeginn oder nach Arbeitsende liegen.</P>
+        </content>
+      </text>
+    </textdaten>
+  </norm>
+
+  <norm builddate="20240115120004" doknr="BJNR001950894BJNE000104377">
+    <metadaten>
+      <jurabk>ArbZG</jurabk>
+      <enbez>§ 3</enbez>
+      <titel format="parat">Ruhepausen</titel>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P nr="1">Die Arbeit ist durch im voraus feststehende Ruhepausen von mindestens 30 Minuten bei einer Arbeitszeit von mehr als sechs bis zu neun Stunden und 45 Minuten bei einer Arbeitszeit von mehr als neun Stunden insgesamt zu unterbrechen.</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+</dokument>

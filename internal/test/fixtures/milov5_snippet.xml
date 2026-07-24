@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dokument SYSTEM "https://www.gesetze-im-internet.de/dtd/1.01/gii-norm.dtd">
+<dokument>
+  <norm builddate="20251105120000" doknr="BJNR000000000BJNE000100000">
+    <metadaten>
+      <jurabk>MiLoV5</jurabk>
+      <langue>Fünfte Mindestlohnanpassungsverordnung</langue>
+      <ausfertigung-datum man="ja">2025-11-05</ausfertigung-datum>
+      <fundstelle>
+        <periodikum>BGBl. I</periodikum>
+        <zit>2025 Nr. 268</zit>
+      </fundstelle>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P>MiLoV5</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+  <norm builddate="20251105120001" doknr="BJNR000000000BJNE000101000">
+    <metadaten>
+      <jurabk>MiLoV5</jurabk>
+      <enbez>§ 1</enbez>
+      <titel>Höhe des Mindestlohns</titel>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P>Der Mindestlohn beträgt ab dem 1. Januar 2026 brutto 13,90 Euro je Zeitstunde.</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+</dokument>

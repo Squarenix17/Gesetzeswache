@@ -262,7 +262,7 @@ func (s *Service) ExportText(ctx context.Context, queryOrID string, formats []st
 	}
 	for _, f := range formats {
 		switch f {
-		case export.FormatHierarchical, export.FormatChunked, export.FormatFlat:
+		case export.FormatHierarchical, export.FormatChunked, export.FormatFlat, export.FormatNormtext:
 		default:
 			return ExportResult{}, fmt.Errorf("unknown format %q", f)
 		}
@@ -323,6 +323,9 @@ func (s *Service) exportLaw(ctx context.Context, law domain.Law, meta FreshnessM
 		case export.FormatChunked:
 			rec := domain.FreshnessRecord{State: meta.State}
 			out.Formats[f] = export.EmitChunked(ir, stand, rec)
+		case export.FormatNormtext:
+			rec := domain.FreshnessRecord{State: meta.State}
+			out.Formats[f] = export.EmitNormtext(ir, stand, rec)
 		}
 	}
 	return out, nil

@@ -46,7 +46,7 @@ func Run(ctx context.Context, svc *service.Service, args []string) int {
 		return printJSON(res, err)
 	case "export":
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: export <query> [formats comma-separated]")
+			fmt.Fprintln(os.Stderr, "usage: export <query> [formats: hierarchical|chunked|flat|normtext]")
 			return 2
 		}
 		var formats []string

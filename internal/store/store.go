@@ -34,7 +34,7 @@ func Open(path string) (*Store, error) {
 	}
 	s := &Store{db: db}
 	err = db.Update(func(tx *bbolt.Tx) error {
-		for _, b := range [][]byte{bucketLaws, bucketVariants, bucketStand, bucketIssues, bucketLinks, bucketFreshness, bucketSyncMeta, bucketSyncLog} {
+		for _, b := range [][]byte{bucketLaws, bucketVariants, bucketStand, bucketIssues, bucketLinks, bucketFreshness, bucketSyncMeta, bucketSyncLog, bucketBGBlIndex, bucketDiscoveredLinks} {
 			if _, err := tx.CreateBucketIfNotExists(b); err != nil {
 				return err
 			}

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Squarenix17/gesetzeswache/internal/citation"
 	"github.com/Squarenix17/gesetzeswache/internal/config"
 	"github.com/Squarenix17/gesetzeswache/internal/domain"
 	"github.com/Squarenix17/gesetzeswache/internal/export"
@@ -286,24 +287,63 @@ func (s *Service) ExportText(ctx context.Context, queryOrID string, formats []st
 }
 
 func (s *Service) exportLaw(ctx context.Context, law domain.Law, meta FreshnessMeta, formats []string) (ExportResult, error) {
-	if s.CFG.RefuseExportStale && meta.State == domain.FreshnessConfirmedStale {
-		return ExportResult{}, fmt.Errorf("export refused: law confirmed_stale")
-	}
 	stand := domain.StandCitation{}
 	if meta.Stand != nil {
 		stand = *meta.Stand
 	}
+
+	var xmlData []byte
+	haveXML := false
+	ensureXML := func() error {
+		if haveXML {
+			return nil
+		}
+		body, err := s.fetchLawXML(ctx, law)
+		if err != nil {
+			return err
+		}
+		xmlData = body
+		haveXML = true
+		return nil
+	}
+
+	// Prefer standangabe from export XML when store Stand is empty, then re-evaluate freshness
+	// before the RefuseExportStale gate so state and Stand stay consistent.
+	if stand.Raw == "" {
+		if err := ensureXML(); err == nil {
+			if raw := export.ExtractStandRaw(xmlData); raw != "" {
+				parsed := citation.Parse(law.ID, raw)
+				_ = s.Store.UpsertStand(parsed)
+				newMeta, err := s.freshnessFor(law.ID)
+				if err != nil {
+					return ExportResult{}, err
+				}
+				meta = newMeta
+				if meta.Stand != nil {
+					stand = *meta.Stand
+				} else {
+					stand = parsed
+					meta.Stand = &stand
+				}
+			}
+		}
+	}
+
+	if s.CFG.RefuseExportStale && meta.State == domain.FreshnessConfirmedStale {
+		return ExportResult{}, fmt.Errorf("export refused: law confirmed_stale")
+	}
+
 	contentID := export.ContentIDFromStand(stand)
 	ir, ok := s.Export.Get(law.ID, contentID)
 	if !ok {
-		xmlData, err := s.fetchLawXML(ctx, law)
-		if err != nil {
+		if err := ensureXML(); err != nil {
 			return ExportResult{Matched: true, Law: &law, Freshness: &meta}, err
 		}
-		ir, err = export.BuildIR(law, contentID, xmlData)
+		built, err := export.BuildIR(law, contentID, xmlData)
 		if err != nil {
 			return ExportResult{}, err
 		}
+		ir = built
 		s.Export.Put(ir)
 	}
 	out := ExportResult{

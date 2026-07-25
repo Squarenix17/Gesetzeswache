@@ -12,12 +12,56 @@ type ParentLookup interface {
 	ByTitlePhrase(phrase string) []string
 }
 
+// sgbBookPhraseEntry maps German ordinal SGB book phrases to jurabk.
+type sgbBookPhraseEntry struct {
+	jurabk     string
+	tokens     []string // lowercase substrings matched in title phrases (longest first)
+	fullTitles []string // canonical "… Buches Sozialgesetzbuch" forms
+}
+
+// Longer / more distinctive tokens first so "zwölften" is not confused with "elften"
+// after normalize.Key umlaut folding (zwoelften contains elften as substring).
+var sgbBookPhraseEntries = []sgbBookPhraseEntry{
+	{jurabk: "SGB XII", tokens: []string{"zwölften buches", "zwoelften buches", "zwölftes buch", "zwoelftes buch"},
+		fullTitles: []string{"Zwölften Buches Sozialgesetzbuch", "Zwölftes Buch Sozialgesetzbuch"}},
+	{jurabk: "SGB XI", tokens: []string{"elften buches", "elftes buch"},
+		fullTitles: []string{"Elften Buches Sozialgesetzbuch", "Elftes Buch Sozialgesetzbuch", "Elften Buches", "Elftes Buch"}},
+	{jurabk: "SGB X", tokens: []string{"zehnten buches", "zehntes buch"},
+		fullTitles: []string{"Zehnten Buches Sozialgesetzbuch", "Zehntes Buch Sozialgesetzbuch"}},
+	{jurabk: "SGB IX", tokens: []string{"neunten buches", "neuntes buch"},
+		fullTitles: []string{"Neunten Buches Sozialgesetzbuch", "Neuntes Buch Sozialgesetzbuch"}},
+	{jurabk: "SGB VIII", tokens: []string{"achten buches", "achtes buch"},
+		fullTitles: []string{"Achten Buches Sozialgesetzbuch", "Achtes Buch Sozialgesetzbuch"}},
+	{jurabk: "SGB VII", tokens: []string{"siebenten buches", "siebten buches", "siebentes buch", "siebtes buch"},
+		fullTitles: []string{"Siebten Buches Sozialgesetzbuch", "Siebtes Buch Sozialgesetzbuch"}},
+	{jurabk: "SGB VI", tokens: []string{"sechsten buches", "sechstes buch"},
+		fullTitles: []string{"Sechsten Buches Sozialgesetzbuch", "Sechstes Buch Sozialgesetzbuch"}},
+	{jurabk: "SGB V", tokens: []string{"fünften buches", "fuenften buches", "fünftes buch", "fuenftes buch"},
+		fullTitles: []string{"Fünften Buches Sozialgesetzbuch", "Fünftes Buch Sozialgesetzbuch"}},
+	{jurabk: "SGB IV", tokens: []string{"vierten buches", "viertes buch"},
+		fullTitles: []string{"Vierten Buches Sozialgesetzbuch", "Viertes Buch Sozialgesetzbuch"}},
+	{jurabk: "SGB III", tokens: []string{"dritten buches", "drittes buch"},
+		fullTitles: []string{"Dritten Buches Sozialgesetzbuch", "Drittes Buch Sozialgesetzbuch"}},
+	{jurabk: "SGB II", tokens: []string{"zweiten buches", "zweites buch"},
+		fullTitles: []string{"Zweiten Buches Sozialgesetzbuch", "Zweites Buch Sozialgesetzbuch"}},
+	{jurabk: "SGB I", tokens: []string{"ersten buches", "erstes buch"},
+		fullTitles: []string{"Ersten Buches Sozialgesetzbuch", "Erstes Buch Sozialgesetzbuch"}},
+}
+
 var builtInTitleParents = map[string]string{
-	normalize.Key("Elften Buches"):      "SGB XI",
-	normalize.Key("Elften Buches Sozialgesetzbuch"): "SGB XI",
-	normalize.Key("Elftes Buch"):        "SGB XI",
-	normalize.Key("Mindestlohngesetz"):  "milog",
+	normalize.Key("Mindestlohngesetz"):   "milog",
 	normalize.Key("Mindestlohngesetzes"): "milog",
+}
+
+func init() {
+	for _, e := range sgbBookPhraseEntries {
+		for _, token := range e.tokens {
+			builtInTitleParents[normalize.Key(token)] = e.jurabk
+		}
+		for _, title := range e.fullTitles {
+			builtInTitleParents[normalize.Key(title)] = e.jurabk
+		}
+	}
 }
 
 // ResolveParent returns a canonical parent law ID when uniquely resolvable.
@@ -53,11 +97,23 @@ func preciseParentCandidates(e Ermaechtigung, lookup ParentLookup) []string {
 	if mapped := builtInTitleParents[phraseKey]; mapped != "" {
 		out = append(out, resolveBuiltInParent(mapped, lookup)...)
 	}
-	// Phrase must contain the built-in book/name token (never the reverse: short
-	// phrases must not match because they are substrings of "Mindestlohngesetz").
-	for key, mapped := range builtInTitleParents {
+	// Exact builtin key containment for MiLoG-style names (not SGB ordinals):
+	// only match when the phrase contains the full normalized name token.
+	for _, name := range []string{"Mindestlohngesetz", "Mindestlohngesetzes"} {
+		key := normalize.Key(name)
 		if phraseKey == key || strings.Contains(phraseKey, key) {
-			out = append(out, resolveBuiltInParent(mapped, lookup)...)
+			out = append(out, resolveBuiltInParent("milog", lookup)...)
+		}
+	}
+	// SGB ordinals: match on raw lowercase so umlaut folding cannot make
+	// "zwölften" collide with "elften" (zwoelften contains elften).
+	lower := strings.ToLower(e.LawTitlePhrase)
+	for _, entry := range sgbBookPhraseEntries {
+		for _, token := range entry.tokens {
+			if strings.Contains(lower, token) {
+				out = append(out, resolveBuiltInParent(entry.jurabk, lookup)...)
+				break
+			}
 		}
 	}
 	return out
@@ -123,9 +179,10 @@ func uniqueIDs(ids []string) []string {
 }
 
 // ScoreConfidence rates discovery confidence as low, medium, or high.
-// High requires a unique parent, section hint, and fundstelle confirmation.
-// Multi-parent matches cap at medium. editorialAgrees can bump medium to high
-// when the other prerequisites are already satisfied.
+// High requires a unique parent (per Ermächtigung segment), section hint, and
+// fundstelle confirmation. Ambiguous parent candidates within a segment cap at
+// medium. editorialAgrees can bump medium to high when the other prerequisites
+// are already satisfied.
 func ScoreConfidence(parentUnique bool, sectionHint string, fundstelleOK bool, editorialAgrees bool) string {
 	if !parentUnique {
 		if sectionHint != "" || fundstelleOK {

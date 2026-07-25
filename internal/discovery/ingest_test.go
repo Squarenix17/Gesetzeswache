@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Squarenix17/gesetzeswache/internal/citation"
@@ -9,6 +10,17 @@ import (
 	"github.com/Squarenix17/gesetzeswache/internal/store"
 	"github.com/Squarenix17/gesetzeswache/internal/test/fixtures"
 )
+
+func TestRejectUnsafeXML_EntityBlocked(t *testing.T) {
+	xmlData := []byte(`<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe "xxe">]><dokumente></dokumente>`)
+	if err := rejectUnsafeXML(xmlData); err == nil {
+		t.Fatal("expected error for internal ENTITY")
+	}
+	safe := []byte(`<?xml version="1.0"?><!DOCTYPE dokumente SYSTEM "http://www.gesetze-im-internet.de/dtd/1.01/gii-norm.dtd"><dokumente></dokumente>`)
+	if err := rejectUnsafeXML(safe); err != nil {
+		t.Fatalf("SYSTEM doctype should be allowed: %v", err)
+	}
+}
 
 func TestLooksLikeVerordnung(t *testing.T) {
 	tests := []struct {
@@ -168,6 +180,75 @@ func TestIngestLawXML_Idempotent(t *testing.T) {
 	}
 	if len(st.discovered) != 1 {
 		t.Fatalf("discovered keys=%d want 1", len(st.discovered))
+	}
+}
+
+func TestIngestLawXML_SVBezGrV_MultiParent(t *testing.T) {
+	st := newMemIngestStore()
+	lookup := CatalogLookup{
+		Laws: []domain.Law{
+			{ID: "sgb2", Abbreviation: "SGB_2", Title: "Sozialgesetzbuch (SGB) Zweites Buch (II)"},
+			{ID: "sgb4", Abbreviation: "SGB_4", Title: "Sozialgesetzbuch (SGB) Viertes Buch (IV)"},
+			{ID: "sgb5", Abbreviation: "SGB_5", Title: "Sozialgesetzbuch (SGB) Fünftes Buch (V)"},
+			{ID: "sgb6", Abbreviation: "SGB_6", Title: "Sozialgesetzbuch (SGB) Sechstes Buch (VI)"},
+			{ID: "sgb11", Abbreviation: "SGB_11", Title: "Sozialgesetzbuch (SGB) Elftes Buch (XI)"},
+		},
+		Variants: []domain.LawVariant{
+			{Variant: "SGB IV", LawID: "sgb4"},
+			{Variant: "SGB V", LawID: "sgb5"},
+			{Variant: "SGB VI", LawID: "sgb6"},
+			{Variant: "SGB 4", LawID: "sgb4"},
+			{Variant: "SGB 5", LawID: "sgb5"},
+			{Variant: "SGB 6", LawID: "sgb6"},
+		},
+	}
+	law := domain.Law{
+		ID:           "svbezgrv2025",
+		Abbreviation: "SVBezGrV 2025",
+		Title:        "Verordnung über maßgebende Rechengrößen der Sozialversicherung für 2025",
+		GIIPath:      "svbezgrv_2025",
+	}
+	xmlData := fixtures.MustRead("svbezgrv_2025_preamble.xml")
+
+	n, err := IngestLawXML(st, lookup, law, xmlData)
+	if err != nil {
+		t.Fatalf("IngestLawXML: %v", err)
+	}
+	if n != 3 {
+		t.Fatalf("nLinks=%d want 3; discovered=%+v", n, st.discovered)
+	}
+
+	idx, ok := st.bgblIndex["BGBl-1/2024/365"]
+	if !ok {
+		t.Fatalf("expected BGBl index; got %+v", st.bgblIndex)
+	}
+	if idx.GIISlug != "svbezgrv_2025" {
+		t.Fatalf("index slug=%q", idx.GIISlug)
+	}
+
+	want := map[string]string{
+		"sgb4|svbezgrv_2025": "§ 17",
+		"sgb5|svbezgrv_2025": "§ 6",
+		"sgb6|svbezgrv_2025": "§ 69",
+	}
+	for key, hintPart := range want {
+		edges := st.discovered[key]
+		if len(edges) != 1 {
+			t.Fatalf("key %s edges=%d want 1; all=%+v", key, len(edges), st.discovered)
+		}
+		e := edges[0]
+		if e.Confidence != ConfidenceHigh {
+			t.Fatalf("%s Confidence=%q want high", key, e.Confidence)
+		}
+		if e.ChildLawID != "svbezgrv2025" {
+			t.Fatalf("%s ChildLawID=%q", key, e.ChildLawID)
+		}
+		if !strings.Contains(e.SectionHint, hintPart) {
+			t.Fatalf("%s SectionHint=%q want containing %q", key, e.SectionHint, hintPart)
+		}
+	}
+	if !strings.Contains(st.discovered["sgb4|svbezgrv_2025"][0].SectionHint, "§ 18") {
+		t.Fatalf("sgb4 hints should include § 18: %q", st.discovered["sgb4|svbezgrv_2025"][0].SectionHint)
 	}
 }
 

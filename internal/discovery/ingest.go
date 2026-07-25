@@ -340,29 +340,50 @@ func IngestLawXML(st IngestStore, lookup ParentLookup, law domain.Law, xmlData [
 
 	preamble := ExtractPreambleText(xmlData)
 	refs := ParseErmaechtigung(preamble)
-	if len(refs) > 0 {
-		if err := st.DeleteDiscoveredBySlug(law.GIIPath); err != nil {
-			return 0, err
-		}
+
+	// Aggregate § hints per uniquely resolved parent so multi-§ segments do not
+	// overwrite each other on the parent|slug store key.
+	type parentAgg struct {
+		hints []string
+		raw   string
 	}
+	byParent := map[string]*parentAgg{}
+	hintSeen := map[string]map[string]struct{}{}
+
 	for _, e := range refs {
 		parentID, parentUnique := ResolveParent(e, lookup)
-		sectionHint := e.SectionHint()
-		confidence := ScoreConfidence(parentUnique, sectionHint, fundstelleOK, false)
-		// Persist only high-confidence edges (medium/low are parse noise for metrics).
-		if confidence != ConfidenceHigh {
+		if parentID == "" || !parentUnique {
 			continue
 		}
-		if parentID == "" {
+		agg := byParent[parentID]
+		if agg == nil {
+			agg = &parentAgg{raw: e.Raw}
+			byParent[parentID] = agg
+			hintSeen[parentID] = map[string]struct{}{}
+		}
+		if h := e.SectionHint(); h != "" {
+			if _, ok := hintSeen[parentID][h]; !ok {
+				hintSeen[parentID][h] = struct{}{}
+				agg.hints = append(agg.hints, h)
+			}
+		}
+	}
+
+	var toPersist []domain.DiscoveredEdge
+	for parentID, agg := range byParent {
+		sectionHint := strings.Join(agg.hints, "; ")
+		confidence := ScoreConfidence(true, sectionHint, fundstelleOK, false)
+		// Persist only high-confidence edges (medium/low are parse noise for metrics).
+		if confidence != ConfidenceHigh {
 			continue
 		}
 
 		notes := fundNotes
 		if notes == "" {
-			notes = e.Raw
+			notes = agg.raw
 		}
 
-		edge := domain.DiscoveredEdge{
+		toPersist = append(toPersist, domain.DiscoveredEdge{
 			ParentLawID: parentID,
 			GIISlug:     law.GIIPath,
 			SectionHint: sectionHint,
@@ -370,7 +391,16 @@ func IngestLawXML(st IngestStore, lookup ParentLookup, law domain.Law, xmlData [
 			EdgeType:    EdgeErmaechtigung,
 			Confidence:  confidence,
 			ChildLawID:  law.ID,
+		})
+	}
+
+	// Delete prior edges only when we have high replacements (avoid wipe-on-noise).
+	if len(toPersist) > 0 {
+		if err := st.DeleteDiscoveredBySlug(law.GIIPath); err != nil {
+			return 0, err
 		}
+	}
+	for _, edge := range toPersist {
 		if err := st.UpsertDiscoveredLink(edge); err != nil {
 			return nLinks, err
 		}

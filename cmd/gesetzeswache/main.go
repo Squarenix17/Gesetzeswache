@@ -58,6 +58,13 @@ func run(args []string) int {
 	}
 	log.Info("linked instruments loaded", "path", cfg.LinkedInstrumentsPath, "parents", instrCat.Len())
 
+	familyCat, err := instruments.LoadFamiliesTSV(cfg.FortschreibungFamiliesPath)
+	if err != nil {
+		log.Error("load fortschreibung families", "err", err)
+		return 1
+	}
+	log.Info("fortschreibung families loaded", "path", cfg.FortschreibungFamiliesPath, "parents", familyCat.Len())
+
 	httpClient := httpx.New(cfg.HTTPTimeout, cfg.RequestMinGap, 32<<20)
 	httpClient.Metrics = reg
 	eng := search.NewEngine()
@@ -67,7 +74,7 @@ func run(args []string) int {
 	}
 	_ = loadVariantsFile(cfg.VariantsPath, st, eng, log)
 
-	orch := &sync.Orchestrator{CFG: cfg, Store: st, HTTP: httpClient, Search: eng, Log: log, Metrics: reg, Instruments: instrCat}
+	orch := &sync.Orchestrator{CFG: cfg, Store: st, HTTP: httpClient, Search: eng, Log: log, Metrics: reg, Instruments: instrCat, Families: familyCat}
 	svc := &service.Service{
 		CFG:         cfg,
 		Store:       st,
@@ -78,6 +85,7 @@ func run(args []string) int {
 		Log:         log,
 		Metrics:     reg,
 		Instruments: instrCat,
+		Families:    familyCat,
 	}
 
 	if len(args) == 0 {

@@ -31,8 +31,9 @@ type Config struct {
 	ELIBase            string
 	SharedSecret       string // optional; empty = disabled
 	VariantsPath       string
-	LinkedInstrumentsPath string
-	RefuseExportStale  bool
+	LinkedInstrumentsPath       string
+	FortschreibungFamiliesPath  string
+	RefuseExportStale           bool
 	StandRefreshMax    int // max laws missing Stand to refresh at InitialSync (0 = skip bulk)
 	DiscoveryEnabled   bool
 	DiscoveryMaxPerCycle int
@@ -62,8 +63,9 @@ func Load() (Config, error) {
 		ELIBase:          env("GEW_ELI_BASE", "https://www.recht.bund.de/eli/bund"),
 		SharedSecret:     os.Getenv("GEW_SHARED_SECRET"),
 		VariantsPath:     env("GEW_VARIANTS_PATH", "variants/variants.tsv"),
-		LinkedInstrumentsPath: env("GEW_LINKED_INSTRUMENTS_PATH", "variants/linked_instruments.tsv"),
-		RefuseExportStale: envBool("GEW_REFUSE_EXPORT_STALE", false),
+		LinkedInstrumentsPath:      env("GEW_LINKED_INSTRUMENTS_PATH", "variants/linked_instruments.tsv"),
+		FortschreibungFamiliesPath: env("GEW_FORTSCHREIBUNG_FAMILIES_PATH", "variants/fortschreibung_families.tsv"),
+		RefuseExportStale:          envBool("GEW_REFUSE_EXPORT_STALE", false),
 		StandRefreshMax:        envInt("GEW_STAND_REFRESH_MAX", 10),
 		DiscoveryEnabled:       envBool("GEW_DISCOVERY_ENABLED", true),
 		DiscoveryMaxPerCycle:   envInt("GEW_DISCOVERY_MAX_PER_CYCLE", 50),

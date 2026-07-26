@@ -38,6 +38,7 @@ type Service struct {
 	Log         *slog.Logger
 	Metrics     *metrics.Registry
 	Instruments *instruments.Catalog
+	Families    *instruments.FamilyCatalog
 }
 
 // Envelope is the API response shape.
@@ -184,22 +185,20 @@ func (s *Service) freshnessFor(lawID string, opts IncludeOpts) (FreshnessMeta, e
 	hasLinked := len(linkedRows) > 0 || discErr != nil
 	instrRefs, instrIssues := instruments.CollectEvidence(s.Store, linkedRows, lawID, stand)
 	now := time.Now().UTC()
-	// Ensure seeded TSV children exist for recheck/export.
-	if n, err := instruments.EnsureSeededChildren(s.Store, s.Instruments, s.CFG.GIIBase, lawID); err != nil {
-		if s.Log != nil {
-			s.Log.Warn("ensure seeded children", "law", lawID, "err", err)
-		}
-	} else if n > 0 {
-		s.refreshSearchIndex()
-	}
-	// Ensure discovered high-confidence children exist as law stubs.
+	// Ensure all linked instrument children exist as law stubs (seeded, family, discovered).
+	ensured := map[string]struct{}{}
 	for _, li := range linkedRows {
-		if li.Source != discovery.SourceDiscovered {
+		slug := strings.TrimSpace(li.GIISlug)
+		if slug == "" {
 			continue
 		}
-		if _, neu, err := instruments.EnsureLawFromSlug(s.Store, s.CFG.GIIBase, li.GIISlug); err != nil {
+		if _, done := ensured[slug]; done {
+			continue
+		}
+		ensured[slug] = struct{}{}
+		if _, neu, err := instruments.EnsureLawFromSlug(s.Store, s.CFG.GIIBase, slug); err != nil {
 			if s.Log != nil {
-				s.Log.Warn("ensure discovered child", "law", lawID, "slug", li.GIISlug, "err", err)
+				s.Log.Warn("ensure linked child", "law", lawID, "slug", slug, "err", err)
 			}
 		} else if neu {
 			s.refreshSearchIndex()
@@ -250,6 +249,13 @@ func (s *Service) freshnessFor(lawID string, opts IncludeOpts) (FreshnessMeta, e
 
 func (s *Service) linkedInstrumentsFor(lawID string) ([]domain.LinkedInstrument, error) {
 	seeded := instruments.ForParentSafe(s.Instruments, lawID)
+	if s.Families != nil && s.Store != nil {
+		laws, err := s.Store.ListLaws()
+		if err != nil {
+			return discovery.Merge(seeded, nil), err
+		}
+		seeded = append(seeded, instruments.ExpandForParentSafe(s.Families, lawID, laws)...)
+	}
 	var discovered []domain.LinkedInstrument
 	if s.Store != nil {
 		edges, err := s.Store.DiscoveredForParent(lawID)
@@ -337,22 +343,31 @@ func (s *Service) ForceRecheck(ctx context.Context, lawID string) error {
 		if law, ok, _ := s.Store.GetLaw(lawID); ok {
 			_ = s.Sync.RefreshStandForLaw(ctx, law)
 			s.Export.InvalidateLaw(law.ID)
-			// Ensure + refresh all seeded children (including past) for evidence.
-			if n, err := instruments.EnsureSeededChildren(s.Store, s.Instruments, s.CFG.GIIBase, lawID); err != nil {
-				if s.Log != nil {
-					s.Log.Warn("ensure seeded children on recheck", "law", lawID, "err", err)
-				}
-			} else if n > 0 {
-				s.refreshSearchIndex()
+			// Ensure + refresh all linked children (TSV, family, discovered) for evidence.
+			rows, err := s.linkedInstrumentsFor(lawID)
+			if err != nil && s.Log != nil {
+				s.Log.Warn("linked instruments on recheck", "law", lawID, "err", err)
 			}
-			for _, li := range func() []domain.LinkedInstrument {
-				rows, err := s.linkedInstrumentsFor(lawID)
-				if err != nil && s.Log != nil {
-					s.Log.Warn("discovered links on recheck", "law", lawID, "err", err)
+			ensured := map[string]struct{}{}
+			refreshedIndex := false
+			for _, li := range rows {
+				slug := strings.TrimSpace(li.GIISlug)
+				if slug == "" {
+					continue
 				}
-				return rows
-			}() {
-				childID := normalize.Key(li.GIISlug)
+				if _, done := ensured[slug]; done {
+					continue
+				}
+				ensured[slug] = struct{}{}
+				if _, neu, err := instruments.EnsureLawFromSlug(s.Store, s.CFG.GIIBase, slug); err != nil {
+					if s.Log != nil {
+						s.Log.Warn("ensure linked child on recheck", "law", lawID, "slug", slug, "err", err)
+					}
+					continue
+				} else if neu {
+					refreshedIndex = true
+				}
+				childID := normalize.Key(slug)
 				if li.LawID != "" {
 					childID = normalize.Key(li.LawID)
 				}
@@ -360,6 +375,9 @@ func (s *Service) ForceRecheck(ctx context.Context, lawID string) error {
 					_ = s.Sync.RefreshStandForLaw(ctx, child)
 					s.Export.InvalidateLaw(child.ID)
 				}
+			}
+			if refreshedIndex {
+				s.refreshSearchIndex()
 			}
 		}
 	}

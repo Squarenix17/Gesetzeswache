@@ -38,6 +38,7 @@ type Orchestrator struct {
 	Log         *slog.Logger
 	Metrics     *metrics.Registry
 	Instruments *instruments.Catalog
+	Families    *instruments.FamilyCatalog
 }
 
 type tocItem struct {
@@ -436,6 +437,9 @@ func (o *Orchestrator) Reconcile(ctx context.Context) error {
 			}
 		}
 		seeded := instruments.ForParentSafe(o.Instruments, law.ID)
+		if o.Families != nil {
+			seeded = append(seeded, instruments.ExpandForParentSafe(o.Families, law.ID, laws)...)
+		}
 		edges, discErr := o.Store.DiscoveredForParent(law.ID)
 		if discErr != nil && o.Log != nil {
 			o.Log.Warn("discovered links read failed", "law", law.ID, "err", discErr)

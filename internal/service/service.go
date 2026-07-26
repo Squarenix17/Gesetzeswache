@@ -249,12 +249,14 @@ func (s *Service) freshnessFor(lawID string, opts IncludeOpts) (FreshnessMeta, e
 
 func (s *Service) linkedInstrumentsFor(lawID string) ([]domain.LinkedInstrument, error) {
 	seeded := instruments.ForParentSafe(s.Instruments, lawID)
+	var familyExpanded []domain.LinkedInstrument
 	if s.Families != nil && s.Store != nil {
 		laws, err := s.Store.ListLaws()
 		if err != nil {
 			return discovery.Merge(seeded, nil), err
 		}
-		seeded = append(seeded, instruments.ExpandForParentSafe(s.Families, lawID, laws)...)
+		familyExpanded = instruments.ExpandForParentSafe(s.Families, lawID, laws)
+		seeded = append(seeded, familyExpanded...)
 	}
 	var discovered []domain.LinkedInstrument
 	if s.Store != nil {
@@ -264,6 +266,20 @@ func (s *Service) linkedInstrumentsFor(lawID string) ([]domain.LinkedInstrument,
 		}
 		for _, e := range edges {
 			discovered = append(discovered, discovery.EdgeToLinked(e))
+		}
+	}
+	if s.Families != nil {
+		rows := s.Families.ForParent(lawID)
+		if len(rows) > 0 {
+			prefixes := make([]string, 0, len(rows))
+			for _, row := range rows {
+				prefixes = append(prefixes, row.SlugPrefix)
+			}
+			keepSlugs := make(map[string]struct{}, len(familyExpanded))
+			for _, li := range familyExpanded {
+				keepSlugs[li.GIISlug] = struct{}{}
+			}
+			discovered = discovery.FilterDiscoveredByFamilyPrefixes(discovered, prefixes, keepSlugs)
 		}
 	}
 	return discovery.Merge(seeded, discovered), nil

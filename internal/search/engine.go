@@ -97,7 +97,10 @@ func (s *Snapshot) Resolve(query string, threshold float64) (best *Candidate, su
 			ti := normalize.Key(l.Title)
 			scores[l.ID] = max(scores[l.ID], similarity(qk, ab)*0.92)
 			scores[l.ID] = max(scores[l.ID], similarity(qk, ti)*0.85)
-			if stringsContainsFold(ti, qk) || stringsContainsFold(qk, ab) {
+			if len(ab) >= 3 && stringsContainsFold(qk, ab) {
+				scores[l.ID] = max(scores[l.ID], 0.8)
+			}
+			if stringsContainsFold(ti, qk) {
 				scores[l.ID] = max(scores[l.ID], 0.8)
 			}
 		}

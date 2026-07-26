@@ -48,16 +48,29 @@ var sgbBookPhraseEntries = []sgbBookPhraseEntry{
 		fullTitles: []string{"Ersten Buches Sozialgesetzbuch", "Erstes Buch Sozialgesetzbuch"}},
 }
 
-var builtInTitleParents = map[string]string{
-	normalize.Key("Mindestlohngesetz"):                "milog",
-	normalize.Key("Mindestlohngesetzes"):              "milog",
-	normalize.Key("Lastenausgleichsgesetz"):           "lag",
-	normalize.Key("Lastenausgleichsgesetzes"):         "lag",
-	normalize.Key("Arbeitnehmer-Entsendegesetz"):      "aentg2009",
-	normalize.Key("Arbeitnehmer-Entsendegesetzes"):    "aentg2009",
+type builtinParentName struct {
+	names  []string // nominative + genitive display forms
+	mapped string   // canonical law ID or jurabk
 }
 
+var builtinParentNames = []builtinParentName{
+	{names: []string{"Mindestlohngesetz", "Mindestlohngesetzes"}, mapped: "milog"},
+	{names: []string{"Lastenausgleichsgesetz", "Lastenausgleichsgesetzes"}, mapped: "lag"},
+	{names: []string{"Arbeitnehmer-Entsendegesetz", "Arbeitnehmer-Entsendegesetzes"}, mapped: "aentg2009"},
+}
+
+var (
+	builtInTitleParents    = map[string]string{}
+	builtinDirectParentIDs = map[string]struct{}{}
+)
+
 func init() {
+	for _, e := range builtinParentNames {
+		builtinDirectParentIDs[normalize.Key(e.mapped)] = struct{}{}
+		for _, name := range e.names {
+			builtInTitleParents[normalize.Key(name)] = e.mapped
+		}
+	}
 	for _, e := range sgbBookPhraseEntries {
 		for _, token := range e.tokens {
 			builtInTitleParents[normalize.Key(token)] = e.jurabk
@@ -167,20 +180,13 @@ func preciseParentCandidates(e Ermaechtigung, lookup ParentLookup) []string {
 	}
 	// Exact builtin key containment for MiLoG-style names (not SGB ordinals):
 	// only match when the phrase contains the full normalized name token.
-	for _, name := range []string{
-		"Mindestlohngesetz", "Mindestlohngesetzes",
-		"Lastenausgleichsgesetz", "Lastenausgleichsgesetzes",
-		"Arbeitnehmer-Entsendegesetz", "Arbeitnehmer-Entsendegesetzes",
-	} {
-		key := normalize.Key(name)
-		if phraseKey == key || strings.Contains(phraseKey, key) {
-			mapped := "milog"
-			if strings.Contains(key, "lastenausgleich") {
-				mapped = "lag"
-			} else if strings.Contains(key, "arbeitnehmerentsende") {
-				mapped = "aentg2009"
+	for _, entry := range builtinParentNames {
+		for _, name := range entry.names {
+			key := normalize.Key(name)
+			if phraseKey == key || strings.Contains(phraseKey, key) {
+				out = append(out, resolveBuiltInParent(entry.mapped, lookup)...)
+				break
 			}
-			out = append(out, resolveBuiltInParent(mapped, lookup)...)
 		}
 	}
 	// SGB ordinals: match on raw lowercase so umlaut folding cannot make
@@ -198,7 +204,7 @@ func preciseParentCandidates(e Ermaechtigung, lookup ParentLookup) []string {
 }
 
 func resolveBuiltInParent(mapped string, lookup ParentLookup) []string {
-	if strings.EqualFold(mapped, "milog") || strings.EqualFold(mapped, "lag") || strings.EqualFold(mapped, "aentg2009") {
+	if _, direct := builtinDirectParentIDs[normalize.Key(mapped)]; direct {
 		return []string{normalize.Key(mapped)}
 	}
 	return lookup.ByJurabk(mapped)

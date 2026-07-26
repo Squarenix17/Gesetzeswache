@@ -10,7 +10,7 @@ import (
 
 const MaxSlugLen = 128
 
-var slugRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+var slugRe = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9._-]*$`)
 
 // ValidSlug returns true if slug is a single safe path segment.
 func ValidSlug(slug string) bool {

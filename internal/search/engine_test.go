@@ -49,6 +49,39 @@ func TestVariant(t *testing.T) {
 	}
 }
 
+func TestResolveSGB9_variantBeatsSubstring(t *testing.T) {
+	e := NewEngine()
+	e.Swap(
+		[]domain.Law{
+			{ID: "sgb92018", Abbreviation: "SGB IX", Title: "Sozialgesetzbuch IX"},
+			{ID: "s_g", Abbreviation: "S_G", Title: "Some other law"},
+		},
+		[]domain.LawVariant{
+			{Variant: "sgb9", LawID: "sgb92018"},
+			{Variant: "SGB 9", LawID: "sgb92018"},
+		},
+	)
+	best, _ := e.Current().Resolve("sgb9", 0.75)
+	if best == nil || best.Law.ID != "sgb92018" {
+		t.Fatalf("expected sgb92018 via variant, got %+v", best)
+	}
+}
+
+func TestResolveDSGVO_noFalseSubstringMatch(t *testing.T) {
+	e := NewEngine()
+	e.Swap(
+		[]domain.Law{
+			{ID: "s_g", Abbreviation: "S_G", Title: "Some other law"},
+		},
+		nil,
+	)
+	best, sug := e.Current().Resolve("dsgvo", 0.75)
+	if best != nil {
+		t.Fatalf("dsgvo must not match s_g via sg substring; got %+v", best)
+	}
+	_ = sug
+}
+
 func TestResolveVariantSGBXI(t *testing.T) {
 	e := NewEngine()
 	e.Swap(

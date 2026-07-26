@@ -49,10 +49,12 @@ var sgbBookPhraseEntries = []sgbBookPhraseEntry{
 }
 
 var builtInTitleParents = map[string]string{
-	normalize.Key("Mindestlohngesetz"):          "milog",
-	normalize.Key("Mindestlohngesetzes"):        "milog",
-	normalize.Key("Lastenausgleichsgesetz"):     "lag",
-	normalize.Key("Lastenausgleichsgesetzes"):   "lag",
+	normalize.Key("Mindestlohngesetz"):                "milog",
+	normalize.Key("Mindestlohngesetzes"):              "milog",
+	normalize.Key("Lastenausgleichsgesetz"):           "lag",
+	normalize.Key("Lastenausgleichsgesetzes"):         "lag",
+	normalize.Key("Arbeitnehmer-Entsendegesetz"):      "aentg2009",
+	normalize.Key("Arbeitnehmer-Entsendegesetzes"):    "aentg2009",
 }
 
 func init() {
@@ -165,12 +167,18 @@ func preciseParentCandidates(e Ermaechtigung, lookup ParentLookup) []string {
 	}
 	// Exact builtin key containment for MiLoG-style names (not SGB ordinals):
 	// only match when the phrase contains the full normalized name token.
-	for _, name := range []string{"Mindestlohngesetz", "Mindestlohngesetzes", "Lastenausgleichsgesetz", "Lastenausgleichsgesetzes"} {
+	for _, name := range []string{
+		"Mindestlohngesetz", "Mindestlohngesetzes",
+		"Lastenausgleichsgesetz", "Lastenausgleichsgesetzes",
+		"Arbeitnehmer-Entsendegesetz", "Arbeitnehmer-Entsendegesetzes",
+	} {
 		key := normalize.Key(name)
 		if phraseKey == key || strings.Contains(phraseKey, key) {
 			mapped := "milog"
 			if strings.Contains(key, "lastenausgleich") {
 				mapped = "lag"
+			} else if strings.Contains(key, "arbeitnehmerentsende") {
+				mapped = "aentg2009"
 			}
 			out = append(out, resolveBuiltInParent(mapped, lookup)...)
 		}
@@ -190,7 +198,7 @@ func preciseParentCandidates(e Ermaechtigung, lookup ParentLookup) []string {
 }
 
 func resolveBuiltInParent(mapped string, lookup ParentLookup) []string {
-	if strings.EqualFold(mapped, "milog") || strings.EqualFold(mapped, "lag") {
+	if strings.EqualFold(mapped, "milog") || strings.EqualFold(mapped, "lag") || strings.EqualFold(mapped, "aentg2009") {
 		return []string{normalize.Key(mapped)}
 	}
 	return lookup.ByJurabk(mapped)

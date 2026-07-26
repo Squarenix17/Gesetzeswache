@@ -49,8 +49,10 @@ var sgbBookPhraseEntries = []sgbBookPhraseEntry{
 }
 
 var builtInTitleParents = map[string]string{
-	normalize.Key("Mindestlohngesetz"):   "milog",
-	normalize.Key("Mindestlohngesetzes"): "milog",
+	normalize.Key("Mindestlohngesetz"):          "milog",
+	normalize.Key("Mindestlohngesetzes"):        "milog",
+	normalize.Key("Lastenausgleichsgesetz"):     "lag",
+	normalize.Key("Lastenausgleichsgesetzes"):   "lag",
 }
 
 func init() {
@@ -73,6 +75,11 @@ func ResolveParentFromChildTitle(childTitle string, lookup ParentLookup) (lawID 
 		if id, ok := uniqueFrom(lookup.ByTitlePhrase(phrase)); ok {
 			return id, true
 		}
+		if mapped := builtInTitleParents[normalize.Key(phrase)]; mapped != "" {
+			if id, ok := uniqueFrom(resolveBuiltInParent(mapped, lookup)); ok {
+				return id, true
+			}
+		}
 	}
 	return "", false
 }
@@ -82,16 +89,45 @@ func parentPhrasesFromVerordnungTitle(title string) []string {
 	if title == "" {
 		return nil
 	}
+	seen := map[string]struct{}{}
+	var out []string
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return
+		}
+		k := normalize.Key(s)
+		if _, ok := seen[k]; ok {
+			return
+		}
+		seen[k] = struct{}{}
+		out = append(out, s)
+	}
+
 	lower := strings.ToLower(title)
+	if idx := strings.Index(lower, "nach dem "); idx >= 0 {
+		name := strings.TrimSpace(title[idx+len("nach dem "):])
+		if cut := strings.IndexAny(name, ",;"); cut >= 0 {
+			name = strings.TrimSpace(name[:cut])
+		}
+		add(name)
+		if !strings.HasSuffix(strings.ToLower(name), "gesetz") {
+			add(name + "gesetz")
+		}
+		if !strings.HasSuffix(strings.ToLower(name), "gesetzes") {
+			add(name + "gesetzes")
+		}
+	}
+
 	const suffix = "verordnung"
-	if !strings.HasSuffix(lower, suffix) {
-		return nil
+	if strings.HasSuffix(lower, suffix) {
+		base := strings.TrimSpace(title[:len(title)-len(suffix)])
+		if base != "" {
+			add(base + "gesetz")
+			add(base + "gesetzes")
+		}
 	}
-	base := strings.TrimSpace(title[:len(title)-len(suffix)])
-	if base == "" {
-		return nil
-	}
-	return []string{base + "gesetz", base + "gesetzes"}
+	return out
 }
 
 // ResolveParent returns a canonical parent law ID when uniquely resolvable.
@@ -129,10 +165,14 @@ func preciseParentCandidates(e Ermaechtigung, lookup ParentLookup) []string {
 	}
 	// Exact builtin key containment for MiLoG-style names (not SGB ordinals):
 	// only match when the phrase contains the full normalized name token.
-	for _, name := range []string{"Mindestlohngesetz", "Mindestlohngesetzes"} {
+	for _, name := range []string{"Mindestlohngesetz", "Mindestlohngesetzes", "Lastenausgleichsgesetz", "Lastenausgleichsgesetzes"} {
 		key := normalize.Key(name)
 		if phraseKey == key || strings.Contains(phraseKey, key) {
-			out = append(out, resolveBuiltInParent("milog", lookup)...)
+			mapped := "milog"
+			if strings.Contains(key, "lastenausgleich") {
+				mapped = "lag"
+			}
+			out = append(out, resolveBuiltInParent(mapped, lookup)...)
 		}
 	}
 	// SGB ordinals: match on raw lowercase so umlaut folding cannot make
@@ -150,7 +190,7 @@ func preciseParentCandidates(e Ermaechtigung, lookup ParentLookup) []string {
 }
 
 func resolveBuiltInParent(mapped string, lookup ParentLookup) []string {
-	if strings.EqualFold(mapped, "milog") {
+	if strings.EqualFold(mapped, "milog") || strings.EqualFold(mapped, "lag") {
 		return []string{normalize.Key(mapped)}
 	}
 	return lookup.ByJurabk(mapped)

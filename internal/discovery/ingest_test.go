@@ -396,6 +396,51 @@ func TestIngestLawXML_Mindestlohnanpassungsverordnung_noFalseMiLoG(t *testing.T)
 	}
 }
 
+func TestIngestLawXML_UhAnpV_discoversLAG(t *testing.T) {
+	st := newMemIngestStore()
+	lookup := CatalogLookup{
+		Laws: []domain.Law{
+			{ID: "lag", Abbreviation: "LAG", Title: "Gesetz über den Lastenausgleich", GIIPath: "lag"},
+		},
+	}
+	law := domain.Law{
+		ID:           "uhanpv24",
+		Abbreviation: "UhAnpV 24",
+		Title:        "Vierundzwanzigste Verordnung zur Anpassung der Unterhaltshilfe nach dem Lastenausgleichsgesetz",
+		GIIPath:      "uhanpv_24",
+	}
+	xmlData := fixtures.MustRead("uhanpv_24_snippet.xml")
+
+	n, err := IngestLawXML(st, lookup, law, xmlData)
+	if err != nil {
+		t.Fatalf("IngestLawXML: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("nLinks=%d want 1; discovered=%+v", n, st.discovered)
+	}
+
+	edges := st.discovered["lag|uhanpv_24"]
+	if len(edges) != 1 {
+		t.Fatalf("discovered edges=%d want 1; all=%+v", len(edges), st.discovered)
+	}
+	e := edges[0]
+	if e.ParentLawID != "lag" {
+		t.Fatalf("ParentLawID=%q want lag", e.ParentLawID)
+	}
+	if e.SectionHint == "" {
+		t.Fatal("SectionHint should not be empty")
+	}
+	if !strings.Contains(e.SectionHint, "§ 267") {
+		t.Fatalf("SectionHint=%q want containing § 267", e.SectionHint)
+	}
+	if e.Confidence != ConfidenceHigh {
+		t.Fatalf("Confidence=%q want high", e.Confidence)
+	}
+	if e.Notes != "BGBl. 1997 I Nr. 1806" {
+		t.Fatalf("Notes=%q want BGBl. 1997 I Nr. 1806", e.Notes)
+	}
+}
+
 func TestIngestLawXML_SVBezGrV_MultiParent(t *testing.T) {
 	st := newMemIngestStore()
 	lookup := CatalogLookup{

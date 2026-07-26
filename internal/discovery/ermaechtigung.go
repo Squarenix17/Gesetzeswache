@@ -146,7 +146,9 @@ func extractParentPhrase(text string) (phrase, jurabk string) {
 	phrase = pickLawTitleAfterDes(scope)
 	phrase = strings.TrimRight(phrase, "–-:,; ")
 	phrase = trimTrailingSubtitle(phrase)
+	phrase = trimTrailingFassungClause(phrase)
 	phrase = trimTrailingVomClause(phrase)
+	phrase = sanitizeParentPhrase(phrase)
 	jurabk = extractJurabk(scope)
 	if jurabk == "" {
 		jurabk = extractJurabk(text)
@@ -193,6 +195,7 @@ func pickLawTitleAfterDes(scope string) string {
 		raw := strings.TrimSpace(scope[start:])
 		raw = strings.TrimRight(raw, "–-:,; ")
 		raw = trimTrailingSubtitle(raw)
+		raw = trimTrailingFassungClause(raw)
 		raw = trimTrailingVomClause(raw)
 		score := scoreLawTitlePhrase(raw)
 		if score > best.score {
@@ -241,6 +244,29 @@ func trimTrailingVomClause(phrase string) string {
 	lower := strings.ToLower(phrase)
 	if i := strings.Index(lower, " vom "); i >= 0 {
 		return strings.TrimSpace(phrase[:i])
+	}
+	return phrase
+}
+
+func trimTrailingFassungClause(phrase string) string {
+	const tail = " in der fassung der bekanntmachung"
+	lower := strings.ToLower(phrase)
+	if i := strings.Index(lower, tail); i >= 0 {
+		return strings.TrimSpace(phrase[:i])
+	}
+	return phrase
+}
+
+func sanitizeParentPhrase(phrase string) string {
+	phrase = strings.TrimSpace(phrase)
+	if phrase == "" {
+		return ""
+	}
+	if i := strings.Index(phrase, ")"); i >= 0 {
+		phrase = strings.TrimSpace(phrase[:i])
+	}
+	if scoreLawTitlePhrase(phrase) <= 1 {
+		return ""
 	}
 	return phrase
 }

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dokumente SYSTEM "http://www.gesetze-im-internet.de/dtd/1.01/gii-norm.dtd">
+<dokumente>
+<norm>
+<metadaten>
+<fundstelle typ="amtlich"><periodikum>BGBl I</periodikum><zitstelle>1997, 1806</zitstelle></fundstelle>
+</metadaten>
+<textdaten>
+<text format="XML"><Content><P/></Content></text>
+<fussnoten><Content><P>Die V wurde als Artikel 1 V 621-1-12-24/1 v. 10.7.1997 I 1806 (LAGKrSRV) von der Bundesregierung mit Zustimmung des Bundesrates erlassen.</P></Content></fussnoten>
+</textdaten>
+</norm>
+<norm>
+<metadaten><enbez>§ 1</enbez></metadaten>
+<textdaten><text format="XML"><Content><P>
+<LA>für Berechtigte (§ 267 Abs. 1 Satz 1, § 269 Abs. 1 des Gesetzes)</LA>
+<LA>für den jeweiligen Ehegatten (§ 267 Abs. 1 Satz 2 Nr. 1, § 269 Abs. 2 des Gesetzes)</LA>
+<LA>für jedes Kind (§ 267 Abs. 1 Satz 2 Nr. 2, § 269 Abs. 2 des Gesetzes)</LA>
+</P></Content></text></textdaten>
+</norm>
+</dokumente>

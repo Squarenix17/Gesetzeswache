@@ -37,6 +37,18 @@ func TestLoad_DiscoveryEnv(t *testing.T) {
 	}
 }
 
+func TestLoad_FortschreibungFamiliesDefault(t *testing.T) {
+	t.Setenv("GEW_FORTSCHREIBUNG_FAMILIES_PATH", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.FortschreibungFamiliesPath != "variants/fortschreibung_families.tsv" {
+		t.Fatalf("FortschreibungFamiliesPath=%q", cfg.FortschreibungFamiliesPath)
+	}
+}
+
 func TestLoad_DiscoveryEnv_invalidBoolFallsBack(t *testing.T) {
 	t.Setenv("GEW_DISCOVERY_ENABLED", "not-a-bool")
 	t.Setenv("GEW_DISCOVERY_MAX_PER_CYCLE", "not-int")

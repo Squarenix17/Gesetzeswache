@@ -437,8 +437,10 @@ func (o *Orchestrator) Reconcile(ctx context.Context) error {
 			}
 		}
 		seeded := instruments.ForParentSafe(o.Instruments, law.ID)
+		var familyExpanded []domain.LinkedInstrument
 		if o.Families != nil {
-			seeded = append(seeded, instruments.ExpandForParentSafe(o.Families, law.ID, laws)...)
+			familyExpanded = instruments.ExpandForParentSafe(o.Families, law.ID, laws)
+			seeded = append(seeded, familyExpanded...)
 		}
 		edges, discErr := o.Store.DiscoveredForParent(law.ID)
 		if discErr != nil && o.Log != nil {
@@ -447,6 +449,20 @@ func (o *Orchestrator) Reconcile(ctx context.Context) error {
 		var disc []domain.LinkedInstrument
 		for _, e := range edges {
 			disc = append(disc, discovery.EdgeToLinked(e))
+		}
+		if o.Families != nil {
+			rows := o.Families.ForParent(law.ID)
+			if len(rows) > 0 {
+				prefixes := make([]string, 0, len(rows))
+				for _, row := range rows {
+					prefixes = append(prefixes, row.SlugPrefix)
+				}
+				keepSlugs := make(map[string]struct{}, len(familyExpanded))
+				for _, li := range familyExpanded {
+					keepSlugs[li.GIISlug] = struct{}{}
+				}
+				disc = discovery.FilterDiscoveredByFamilyPrefixes(disc, prefixes, keepSlugs)
+			}
 		}
 		linked := discovery.Merge(seeded, disc)
 		instrRefs, instrIssues := instruments.CollectEvidence(o.Store, linked, law.ID, stand)

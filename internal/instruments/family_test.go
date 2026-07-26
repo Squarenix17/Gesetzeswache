@@ -108,6 +108,60 @@ func TestExpandForParent_sgb2(t *testing.T) {
 	}
 }
 
+func TestExpandForParent_sgb6_bsv(t *testing.T) {
+	c := &FamilyCatalog{
+		byParent: map[string][]FamilyRow{
+			"sgb6": {{
+				ConsumerParentID: "sgb6",
+				SlugPrefix:       "bsv_",
+				SectionHint:      "§ 160",
+				Notes:            "Beitragssatz in der Rentenversicherung (BGBl. 2017 I Nr. 3976)",
+			}},
+		},
+	}
+	laws := []domain.Law{
+		{ID: "bsv2015", GIIPath: "bsv_2015"},
+		{ID: "bsv2018", GIIPath: "bsv_2018"},
+	}
+	got := c.ExpandForParent("sgb6", laws)
+	if len(got) != 1 {
+		t.Fatalf("got %d want 1: %+v", len(got), got)
+	}
+	li := got[0]
+	if li.GIISlug != "bsv_2018" {
+		t.Fatalf("GIISlug=%q want bsv_2018", li.GIISlug)
+	}
+	if li.ParentLawID != "sgb6" || li.Kind != "verordnung" || li.SectionHint != "§ 160" {
+		t.Fatalf("fields: %+v", li)
+	}
+	if li.Coverage != CoverageSection {
+		t.Fatalf("coverage=%q", li.Coverage)
+	}
+	if li.Source != "" {
+		t.Fatalf("Source should be unset before merge, got %q", li.Source)
+	}
+}
+
+func TestMerge_familyExpandedBsvSourceSeeded(t *testing.T) {
+	expanded := []domain.LinkedInstrument{
+		{
+			ParentLawID: "sgb6",
+			Kind:        "verordnung",
+			GIISlug:     "bsv_2018",
+			Notes:       "Beitragssatz in der Rentenversicherung (BGBl. 2017 I Nr. 3976)",
+			SectionHint: "§ 160",
+			Coverage:    CoverageSection,
+		},
+	}
+	got := discovery.Merge(expanded, nil)
+	if len(got) != 1 {
+		t.Fatalf("got %d want 1", len(got))
+	}
+	if got[0].Source != discovery.SourceSeeded {
+		t.Fatalf("source=%q want %q", got[0].Source, discovery.SourceSeeded)
+	}
+}
+
 func TestMerge_familyExpandedSourceSeeded(t *testing.T) {
 	expanded := []domain.LinkedInstrument{
 		{

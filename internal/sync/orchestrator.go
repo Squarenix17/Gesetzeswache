@@ -470,8 +470,9 @@ func (o *Orchestrator) Reconcile(ctx context.Context) error {
 			}
 		}
 		linked := discovery.Merge(seeded, disc)
-		instrRefs, instrIssues := instruments.CollectEvidence(o.Store, linked, law.ID, stand)
-		hasLinked := len(linked) > 0 || discErr != nil
+		operativeLinked := instruments.FilterOperativeLinked(o.Store, linked)
+		instrRefs, instrIssues := instruments.CollectEvidence(o.Store, operativeLinked, law.ID, stand)
+		hasLinked := len(operativeLinked) > 0 || discErr != nil
 		rec := freshness.Evaluate(freshness.Input{
 			LawID:                      law.ID,
 			Stand:                      stand,

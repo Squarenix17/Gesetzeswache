@@ -758,3 +758,60 @@ func TestIntegration_BGBlFail_ELIFallback_setsProbeMeta(t *testing.T) {
 		t.Fatal("data_fresh should be true via ELI probe within max age")
 	}
 }
+
+func TestIntegration_EStG_softGesetzFPDemoted(t *testing.T) {
+	mt := httpmock.New()
+	svc := newTestService(t, mt)
+	seedCatalog(t, svc, mt)
+
+	parent := domain.Law{
+		ID: "estg", Abbreviation: "EStG", Title: "Einkommensteuergesetz",
+		GIIPath: "estg", GIIURL: "https://www.gesetze-im-internet.de/estg/",
+	}
+	children := []domain.Law{
+		{ID: "altzertg", Abbreviation: "AltZertG", Title: "Gesetz über die Zertifizierung von Altersvorsorgeverträgen", GIIPath: "altzertg"},
+		{ID: "astg", Abbreviation: "AStG", Title: "Gesetz zur Regelung der Rechtsverhältnisse der in der Steuerverwaltung tätigen Personen", GIIPath: "astg"},
+	}
+	if err := svc.Store.UpsertLaws(append([]domain.Law{parent}, children...)); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range children {
+		if err := svc.Store.UpsertDiscoveredLink(domain.DiscoveredEdge{
+			ParentLawID: "estg", GIISlug: c.GIIPath, Confidence: discovery.ConfidenceHigh,
+			Notes: "BGBl 2020 I Nr. 123",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	now := time.Now().UTC()
+	_ = svc.Store.SetMetaTime("last_toc_success", now)
+	_ = svc.Store.SetMetaTime("last_bgbl_feed_success", now)
+	stand := citation.Parse("estg", "Zuletzt geändert durch Art. 1 G v. 1.1.2024 I Nr. 100")
+	if err := svc.Store.UpsertStand(stand); err != nil {
+		t.Fatal(err)
+	}
+
+	meta, err := svc.Freshness(context.Background(), "estg", IncludeOpts{Linked: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(meta.LinkedInstruments) != 0 {
+		t.Fatalf("soft Gesetz children omitted from linked response; got %+v", meta.LinkedInstruments)
+	}
+	if meta.Rationale == "unresolved_linked_instrument_refs" {
+		t.Fatalf("must not fail-close on soft Gesetz FP; state=%s rationale=%s refs=%+v",
+			meta.State, meta.Rationale, meta.InstrumentRefs)
+	}
+	if meta.State != domain.FreshnessConfirmedCurrent {
+		t.Fatalf("want confirmed_current when only soft Gesetz linked; got %s (%s)", meta.State, meta.Rationale)
+	}
+
+	edges, err := svc.Store.DiscoveredForParent("estg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(edges) != 2 {
+		t.Fatalf("discovery rows must remain in store; got %d", len(edges))
+	}
+}

@@ -182,8 +182,10 @@ func (s *Service) freshnessFor(lawID string, opts IncludeOpts) (FreshnessMeta, e
 	if discErr != nil && s.Log != nil {
 		s.Log.Warn("discovered links read failed", "law", lawID, "err", discErr)
 	}
-	hasLinked := len(linkedRows) > 0 || discErr != nil
-	instrRefs, instrIssues := instruments.CollectEvidence(s.Store, linkedRows, lawID, stand)
+	// Operative linked instruments exclude soft Gesetz discovery FPs (Phase 6 demotion).
+	operativeLinked := instruments.FilterOperativeLinked(s.Store, linkedRows)
+	hasLinked := len(operativeLinked) > 0 || discErr != nil
+	instrRefs, instrIssues := instruments.CollectEvidence(s.Store, operativeLinked, lawID, stand)
 	now := time.Now().UTC()
 	// Ensure all linked instrument children exist as law stubs (seeded, family, discovered).
 	ensured := map[string]struct{}{}
@@ -204,7 +206,7 @@ func (s *Service) freshnessFor(lawID string, opts IncludeOpts) (FreshnessMeta, e
 			s.refreshSearchIndex()
 		}
 	}
-	seeded := instruments.AnnotateChain(linkedRows, now)
+	seeded := instruments.AnnotateChain(operativeLinked, now)
 	linked := instruments.FilterLinkedForResponse(seeded, opts.Past)
 	if opts.Linked {
 		linked = s.attachLinkedPointers(linked)

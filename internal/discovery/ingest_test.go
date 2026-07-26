@@ -441,6 +441,45 @@ func TestIngestLawXML_UhAnpV_discoversLAG(t *testing.T) {
 	}
 }
 
+func TestIngestLawXML_PflegeArbbV_discoversAEntG(t *testing.T) {
+	st := newMemIngestStore()
+	lookup := CatalogLookup{
+		Laws: []domain.Law{
+			{ID: "aentg2009", Abbreviation: "AEntG", Title: "Gesetz über zwingende Arbeitsbedingungen für grenzüberschreitende Entsendungen", GIIPath: "aentg2009"},
+		},
+	}
+	law := domain.Law{
+		ID:           "pflegearbbv7",
+		Abbreviation: "PflegeArbbV 7",
+		Title:        "Siebte Verordnung über zwingende Arbeitsbedingungen für die Pflegebranche",
+		GIIPath:      "pflegearbbv_7",
+	}
+	xmlData := fixtures.MustRead("pflegearbbv_7_snippet.xml")
+
+	n, err := IngestLawXML(st, lookup, law, xmlData)
+	if err != nil {
+		t.Fatalf("IngestLawXML: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("nLinks=%d want 1; discovered=%+v", n, st.discovered)
+	}
+
+	edges := st.discovered["aentg2009|pflegearbbv_7"]
+	if len(edges) != 1 {
+		t.Fatalf("discovered edges=%d want 1; all=%+v", len(edges), st.discovered)
+	}
+	e := edges[0]
+	if e.ParentLawID != "aentg2009" {
+		t.Fatalf("ParentLawID=%q want aentg2009", e.ParentLawID)
+	}
+	if e.SectionHint == "" {
+		t.Fatal("SectionHint should not be empty")
+	}
+	if !strings.Contains(e.SectionHint, "§ 11") {
+		t.Fatalf("SectionHint=%q want containing § 11", e.SectionHint)
+	}
+}
+
 func TestIngestLawXML_SVBezGrV_MultiParent(t *testing.T) {
 	st := newMemIngestStore()
 	lookup := CatalogLookup{

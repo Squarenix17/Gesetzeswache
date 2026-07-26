@@ -140,6 +140,45 @@ func TestResolveParentFromChildTitle_UhAnpV_nachDemLAG(t *testing.T) {
 	}
 }
 
+func TestParseErmaechtigung_AEntG(t *testing.T) {
+	text := "Das Bundesministerium für Arbeit und Soziales verordnet aufgrund des § 11 des Arbeitnehmer-Entsendegesetzes vom 20. April 2009 (BGBl. I S. 799):"
+
+	got := ParseErmaechtigung(text)
+	if len(got) != 1 {
+		t.Fatalf("len(got)=%d want 1; got=%+v", len(got), got)
+	}
+	e := got[0]
+	if e.Section != "11" {
+		t.Fatalf("Section=%q want 11", e.Section)
+	}
+	if !containsFold(e.LawTitlePhrase, "Arbeitnehmer-Entsendegesetz") {
+		t.Fatalf("LawTitlePhrase=%q want Arbeitnehmer-Entsendegesetz", e.LawTitlePhrase)
+	}
+}
+
+func TestResolveParent_ArbeitnehmerEntsendegesetz(t *testing.T) {
+	lookup := CatalogLookup{
+		Laws: []domain.Law{
+			{ID: "aentg2009", Abbreviation: "AEntG", Title: "Gesetz über zwingende Arbeitsbedingungen für grenzüberschreitende Entsendungen", GIIPath: "aentg2009"},
+		},
+	}
+	tests := []struct {
+		phrase string
+	}{
+		{phrase: "Arbeitnehmer-Entsendegesetzes"},
+		{phrase: "Arbeitnehmer-Entsendegesetz"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.phrase, func(t *testing.T) {
+			e := Ermaechtigung{LawTitlePhrase: tt.phrase, Section: "11"}
+			lawID, unique := ResolveParent(e, lookup)
+			if !unique || lawID != "aentg2009" {
+				t.Fatalf("ResolveParent=%q unique=%v want aentg2009", lawID, unique)
+			}
+		})
+	}
+}
+
 func TestParseErmaechtigung_MiLoG(t *testing.T) {
 	text := "Auf Grund des § 11 Absatz 1 des Mindestlohngesetzes"
 

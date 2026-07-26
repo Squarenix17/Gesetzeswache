@@ -93,7 +93,7 @@ Optional: set `GEW_REFUSE_EXPORT_STALE=true` so the server rejects export for `c
 
 Amendment-by-reference parents (e.g. MiLoG, SGB XI § 55) expose `freshness.linked_instruments`: **section-scoped** ordinances with Inkrafttreten (`effective_from`), `section_hint`, and `status` (`current`/`future` by default; superseded `past` only with `include=past`). They are not full-law replacements — export the child slug (e.g. `milov5`, `pbav_2025`) for operative § text.
 
-**Automatic discovery (Phase 4.8):** when a Verordnung is ingested (GII feed / TOC / capped discovery / export), its Ermächtigung is parsed and high-confidence parent→child links are stored automatically (`source=discovered`). Bundle Verordnungen that authorize multiple parent books (e.g. SVBezGrV → SGB IV/V/VI) link **each uniquely resolved parent**. Manual [`variants/linked_instruments.tsv`](variants/linked_instruments.tsv) remains an **override** (wins on collision), not the primary update channel. Config: `GEW_DISCOVERY_ENABLED` (default true), `GEW_DISCOVERY_MAX_PER_CYCLE` (default 50).
+**Automatic discovery (Phase 4.8):** when a Verordnung is ingested (GII feed / TOC / capped discovery / export), its Ermächtigung is parsed and high-confidence parent→child links are stored automatically (`source=discovered`). Bundle Verordnungen that authorize multiple parent books (e.g. SVBezGrV → SGB IV/V/VI) link **each uniquely resolved parent**. Manual [`variants/linked_instruments.tsv`](variants/linked_instruments.tsv) remains an **override** (wins on collision), not the primary update channel. Fortschreibung consumers that are not Ermächtigung parents (e.g. SGB II → current `rbsfv_*`) attach via [`variants/fortschreibung_families.tsv`](variants/fortschreibung_families.tsv) (`source=seeded`, latest catalog year). Config: `GEW_DISCOVERY_ENABLED` (default true), `GEW_DISCOVERY_MAX_PER_CYCLE` (default 50), `GEW_FORTSCHREIBUNG_FAMILIES_PATH`.
 
 ### REST
 
@@ -154,7 +154,7 @@ CLI `recheck` and MCP `force_recheck` call the local process directly (no HTTP t
 
 Informal names (e.g. `Zivilgesetzbuch` → `bgb`) live in [`variants/variants.tsv`](variants/variants.tsv) as TSV: `variant<TAB>law_id`. Override with `GEW_VARIANTS_PATH`.
 
-Linked ordinances (amendment-by-reference) live in [`variants/linked_instruments.tsv`](variants/linked_instruments.tsv); override with `GEW_LINKED_INSTRUMENTS_PATH`.
+Linked ordinances (amendment-by-reference) live in [`variants/linked_instruments.tsv`](variants/linked_instruments.tsv); override with `GEW_LINKED_INSTRUMENTS_PATH`. Fortschreibung family consumers → slug prefix: [`variants/fortschreibung_families.tsv`](variants/fortschreibung_families.tsv).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -206,6 +206,7 @@ All settings use the `GEW_` environment prefix. Essential variables:
 | `GEW_REFUSE_EXPORT_STALE` | `false` | When `true`, refuse export if law is `confirmed_stale` |
 | `GEW_DISCOVERY_ENABLED` | `true` | Auto-discover parent→Verordnung links from Ermächtigung |
 | `GEW_DISCOVERY_MAX_PER_CYCLE` | `50` | Max Verordnungen to ingest per discovery pass |
+| `GEW_FORTSCHREIBUNG_FAMILIES_PATH` | `variants/fortschreibung_families.tsv` | Consumer→Fortschreibung slug-prefix families |
 
 Additional sync intervals, source URLs, and tuning knobs: [`internal/config/config.go`](internal/config/config.go).
 

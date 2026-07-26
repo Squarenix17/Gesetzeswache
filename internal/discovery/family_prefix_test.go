@@ -102,6 +102,22 @@ func TestFilterDiscoveredByFamilyPrefixes(t *testing.T) {
 			keepSlugs:  keepBSV2018,
 			wantSlugs:  nil,
 		},
+		{
+			name: "multi-prefix bsv and rvbeitrsbek keeps latest of each",
+			discovered: []domain.LinkedInstrument{
+				discoveredLI("bsv_2015"),
+				discoveredLI("bsv_2018"),
+				discoveredLI("rvbeitrsbek_2024"),
+				discoveredLI("rvbeitrsbek_2026"),
+				discoveredLI("svbezgrv_2025"),
+			},
+			prefixes: []string{"bsv_", "rvbeitrsbek_"},
+			keepSlugs: map[string]struct{}{
+				"bsv_2018":         {},
+				"rvbeitrsbek_2026": {},
+			},
+			wantSlugs: []string{"bsv_2018", "rvbeitrsbek_2026", "svbezgrv_2025"},
+		},
 	}
 
 	for _, tt := range tests {

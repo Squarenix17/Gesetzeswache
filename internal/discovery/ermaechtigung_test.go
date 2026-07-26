@@ -100,6 +100,21 @@ func TestParseErmaechtigung_AsphAusbV_NotMiLoG(t *testing.T) {
 	}
 }
 
+func TestParseErmaechtigung_WoGV_abbreviatedDesPara(t *testing.T) {
+	text := "Die V wurde aufgrund d. § 36 Nr. 1 u. 2 G v. 14.12.1970 I 1637 von der Bundesregierung mit Zustimmung des Bundesrates erlassen"
+
+	got := ParseErmaechtigung(text)
+	if len(got) != 1 {
+		t.Fatalf("len(got)=%d want 1; got=%+v", len(got), got)
+	}
+	if got[0].Section != "36" {
+		t.Fatalf("Section=%q want 36", got[0].Section)
+	}
+	if got[0].LawTitlePhrase != "" || got[0].Jurabk != "" {
+		t.Fatalf("abbreviated fussnoten must have empty parent hints; got phrase=%q jurabk=%q", got[0].LawTitlePhrase, got[0].Jurabk)
+	}
+}
+
 func TestParseErmaechtigung_MiLoV5_aufgrund(t *testing.T) {
 	text := "Die Bundesregierung verordnet aufgrund des § 11 des Mindestlohngesetzes vom 11. August 2014 (BGBl. I S. 1348), das zuletzt durch Artikel 2 des Gesetzes vom 28. Juni 2023 (BGBl. 2023 I Nr. 172) geändert worden ist:"
 

@@ -274,6 +274,128 @@ func TestIngestLawXML_Idempotent(t *testing.T) {
 	}
 }
 
+func TestExtractPreambleText_WoGV_Fussnoten(t *testing.T) {
+	xmlData := fixtures.MustRead("wogv_fussnote_snippet.xml")
+	got := ExtractPreambleText(xmlData)
+	if got == "" {
+		t.Fatal("expected non-empty preamble from fussnoten")
+	}
+	if !containsFold(got, "aufgrund") {
+		t.Fatalf("preamble missing aufgrund: %q", got)
+	}
+	if !strings.Contains(got, "§ 36") {
+		t.Fatalf("preamble missing § 36: %q", got)
+	}
+	if containsFold(got, "Vertrages") {
+		t.Fatalf("body false positive must not win over fussnoten: %q", got)
+	}
+}
+
+func TestIngestLawXML_WoGV_discoversWoGG(t *testing.T) {
+	st := newMemIngestStore()
+	lookup := CatalogLookup{
+		Laws: []domain.Law{
+			{ID: "wogg", Abbreviation: "WoGG", Title: "Wohngeldgesetz", GIIPath: "wogg"},
+			{ID: "wogv", Abbreviation: "WoGV", Title: "Wohngeldverordnung", GIIPath: "wogv"},
+		},
+	}
+	law := domain.Law{
+		ID:           "wogv",
+		Abbreviation: "WoGV",
+		Title:        "Wohngeldverordnung",
+		GIIPath:      "wogv",
+	}
+	xmlData := fixtures.MustRead("wogv_fussnote_snippet.xml")
+
+	n, err := IngestLawXML(st, lookup, law, xmlData)
+	if err != nil {
+		t.Fatalf("IngestLawXML: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("nLinks=%d want 1; discovered=%+v", n, st.discovered)
+	}
+
+	edges := st.discovered["wogg|wogv"]
+	if len(edges) != 1 {
+		t.Fatalf("discovered edges=%d want 1; all=%+v", len(edges), st.discovered)
+	}
+	e := edges[0]
+	if e.ParentLawID != "wogg" {
+		t.Fatalf("ParentLawID=%q want wogg", e.ParentLawID)
+	}
+	if e.SectionHint != "§ 36" {
+		t.Fatalf("SectionHint=%q want § 36", e.SectionHint)
+	}
+	if e.Confidence != ConfidenceHigh {
+		t.Fatalf("Confidence=%q want high", e.Confidence)
+	}
+	if e.GIISlug != "wogv" {
+		t.Fatalf("GIISlug=%q want wogv", e.GIISlug)
+	}
+}
+
+func TestIngestLawXML_AmbiguousPhraseNoTitleFallback(t *testing.T) {
+	st := newMemIngestStore()
+	lookup := CatalogLookup{
+		Laws: []domain.Law{
+			{ID: "wogg", Abbreviation: "WoGG", Title: "Wohngeldgesetz", GIIPath: "wogg"},
+			{ID: "sgb5", Abbreviation: "SGB_5", Title: "Sozialgesetzbuch (SGB) Fünftes Buch (V)"},
+			{ID: "sgb11", Abbreviation: "SGB_11", Title: "Sozialgesetzbuch (SGB) Elftes Buch (XI)"},
+		},
+	}
+	law := domain.Law{
+		ID:           "wogv",
+		Abbreviation: "WoGV",
+		Title:        "Wohngeldverordnung",
+		GIIPath:      "wogv",
+	}
+	// Explicit "Sozialgesetzbuch" phrase is ambiguous; title fallback to WoGG must not run.
+	xmlData := []byte(`<?xml version="1.0"?><dokument><norm><metadaten>
+      <fundstelle><periodikum>BGBl. I</periodikum><zit>2025 Nr. 1</zit></fundstelle>
+    </metadaten><textdaten><text><Content><P>Auf Grund des § 1 des Sozialgesetzbuches vom 1.1.2020 (BGBl. I S. 1):</P></Content></text></textdaten></norm></dokument>`)
+
+	n, err := IngestLawXML(st, lookup, law, xmlData)
+	if err != nil {
+		t.Fatalf("IngestLawXML: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("nLinks=%d want 0 (ambiguous phrase must not fall back to WoGG); discovered=%+v", n, st.discovered)
+	}
+	if len(st.discovered) != 0 {
+		t.Fatalf("unexpected edges: %+v", st.discovered)
+	}
+}
+
+func TestIngestLawXML_Mindestlohnanpassungsverordnung_noFalseMiLoG(t *testing.T) {
+	st := newMemIngestStore()
+	lookup := CatalogLookup{
+		Laws: []domain.Law{
+			{ID: "milog", Abbreviation: "MiLoG", Title: "Mindestlohngesetz", GIIPath: "milog"},
+		},
+	}
+	law := domain.Law{
+		ID:           "milov5",
+		Abbreviation: "MiLoV5",
+		Title:        "Mindestlohnanpassungsverordnung",
+		GIIPath:      "milov5",
+	}
+	// Abbreviated fussnoten-style Ermächtigung without explicit parent title phrase.
+	xmlData := []byte(`<?xml version="1.0"?><dokument><norm><metadaten>
+      <fundstelle><periodikum>BGBl. I</periodikum><zit>2025 Nr. 268</zit></fundstelle>
+    </metadaten><textdaten><fussnoten><Content><P>aufgrund d. § 11 G v. 11.8.2014 I 1348</P></Content></fussnoten></textdaten></norm></dokument>`)
+
+	n, err := IngestLawXML(st, lookup, law, xmlData)
+	if err != nil {
+		t.Fatalf("IngestLawXML: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("nLinks=%d want 0 (no false milog via title fallback); discovered=%+v", n, st.discovered)
+	}
+	if len(st.discovered) != 0 {
+		t.Fatalf("unexpected edges: %+v", st.discovered)
+	}
+}
+
 func TestIngestLawXML_SVBezGrV_MultiParent(t *testing.T) {
 	st := newMemIngestStore()
 	lookup := CatalogLookup{

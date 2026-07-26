@@ -291,16 +291,29 @@ func rejectUnsafeXML(xmlData []byte) error {
 
 // ExtractPreambleText streams XML CharData and returns text containing an Ermächtigung
 // marker ("Auf Grund" / "aufgrund"), or the first ~8KB of norm text content when no
-// marker is found.
+// marker is found. Marker-bearing <fussnoten> within <norm> wins over <text> so body
+// phrases like "auf Grund eines Vertrages" do not mask historical footnote Ermächtigungen.
 func ExtractPreambleText(xmlData []byte) string {
 	if err := rejectUnsafeXML(xmlData); err != nil {
 		return ""
 	}
 	dec := xml.NewDecoder(bytes.NewReader(xmlData))
-	var inNorm, inText bool
-	var buf strings.Builder
-	var collected strings.Builder
-	foundMarker := false
+	var inNorm, inText, inFussnoten bool
+	var textBuf, fussnotenBuf, collected strings.Builder
+	textMarker, fussnotenMarker := false, false
+
+	appendChunk := func(b *strings.Builder, s string) {
+		if b.Len() >= preambleScanLimit {
+			return
+		}
+		chunk := s
+		remain := preambleScanLimit - b.Len()
+		if len(chunk) > remain {
+			chunk = chunk[:remain]
+		}
+		b.WriteString(chunk)
+		b.WriteByte(' ')
+	}
 
 	for {
 		tok, err := dec.Token()
@@ -320,52 +333,55 @@ func ExtractPreambleText(xmlData []byte) string {
 				if inNorm {
 					inText = true
 				}
+			case "fussnoten":
+				if inNorm {
+					inFussnoten = true
+				}
 			}
 		case xml.EndElement:
 			name := strings.ToLower(t.Name.Local)
 			switch name {
 			case "text":
 				inText = false
+			case "fussnoten":
+				inFussnoten = false
 			case "norm":
 				inNorm = false
-				if foundMarker {
-					return strings.TrimSpace(buf.String())
-				}
-				buf.Reset()
 			}
 		case xml.CharData:
-			if !inNorm || !inText {
+			if !inNorm {
 				continue
 			}
 			s := strings.TrimSpace(string(t))
 			if s == "" {
 				continue
 			}
-			if collected.Len() < preambleScanLimit {
-				chunk := s
-				remain := preambleScanLimit - collected.Len()
-				if len(chunk) > remain {
-					chunk = chunk[:remain]
+			switch {
+			case inFussnoten:
+				if isErmaechtigungMarker(s) {
+					fussnotenMarker = true
 				}
-				collected.WriteString(chunk)
-				collected.WriteByte(' ')
-			}
-			if isErmaechtigungMarker(s) {
-				foundMarker = true
-			}
-			if foundMarker && buf.Len() < preambleScanLimit {
-				chunk := s
-				remain := preambleScanLimit - buf.Len()
-				if len(chunk) > remain {
-					chunk = chunk[:remain]
+				if fussnotenMarker {
+					appendChunk(&fussnotenBuf, s)
 				}
-				buf.WriteString(chunk)
-				buf.WriteByte(' ')
+			case inText:
+				if collected.Len() < preambleScanLimit {
+					appendChunk(&collected, s)
+				}
+				if isErmaechtigungMarker(s) {
+					textMarker = true
+				}
+				if textMarker {
+					appendChunk(&textBuf, s)
+				}
 			}
 		}
 	}
-	if foundMarker {
-		return strings.TrimSpace(buf.String())
+	if fussnotenMarker {
+		return strings.TrimSpace(fussnotenBuf.String())
+	}
+	if textMarker {
+		return strings.TrimSpace(textBuf.String())
 	}
 	return strings.TrimSpace(collected.String())
 }
@@ -431,6 +447,13 @@ func IngestLawXML(st IngestStore, lookup ParentLookup, law domain.Law, xmlData [
 
 	for _, e := range refs {
 		parentID, parentUnique := ResolveParent(e, lookup)
+		// Title fallback is only for abbreviated fussnoten ("d. § … G v.") with no
+		// explicit parent phrase or jurabk. Do not mask ambiguous explicit phrases.
+		if (parentID == "" || !parentUnique) &&
+			strings.TrimSpace(e.LawTitlePhrase) == "" &&
+			strings.TrimSpace(e.Jurabk) == "" {
+			parentID, parentUnique = ResolveParentFromChildTitle(law.Title, lookup)
+		}
 		if parentID == "" || !parentUnique {
 			continue
 		}

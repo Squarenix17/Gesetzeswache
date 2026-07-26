@@ -13,6 +13,7 @@ var (
 	reAufGrund     = regexp.MustCompile(`(?i)\b(?:auf\s+grund|aufgrund)\b`)
 	reDashDesPara  = regexp.MustCompile(`(?i)[–\-]\s*des\s+§`)
 	reDesPara      = regexp.MustCompile(`(?i)des\s+§`)
+	reAbbrDesPara  = regexp.MustCompile(`(?i)\bd\.\s*§`)
 	reVerordnet    = regexp.MustCompile(`(?i)\bverordnet\s+(?:die|das)\b`)
 )
 
@@ -111,6 +112,9 @@ func segmentStartIndexes(text string) []int {
 	for _, m := range reAufGrund.FindAllStringIndex(text, -1) {
 		rest := text[m[0]:]
 		loc := reDesPara.FindStringIndex(rest)
+		if loc == nil {
+			loc = reAbbrDesPara.FindStringIndex(rest)
+		}
 		if loc != nil && loc[0] < 80 {
 			add(m[0] + loc[0])
 		}
@@ -159,6 +163,7 @@ func authorizationScope(text string) string {
 	lower := strings.ToLower(text)
 	for _, cut := range []string{
 		", von denen", ", von dem", ", von der",
+		" von denen", " von dem", " von der",
 		", dessen", ", deren",
 		", der zuletzt", ", die zuletzt", ", das zuletzt",
 		", der durch", ", die durch", ", das durch",

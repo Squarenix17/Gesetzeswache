@@ -22,6 +22,54 @@ func TestRejectUnsafeXML_EntityBlocked(t *testing.T) {
 	}
 }
 
+func TestCatalogLookup_ByTitlePhrase_prefersPhraseContainsTitle_overCitingVerordnung(t *testing.T) {
+	catalog := CatalogLookup{
+		Laws: []domain.Law{
+			{ID: "bgb", Abbreviation: "BGB", Title: "Bürgerliches Gesetzbuch", GIIPath: "bgb"},
+			{
+				ID: "minuhv", Abbreviation: "MinUhV", GIIPath: "minuhv",
+				Title: "Verordnung zur Festlegung des Mindestunterhalts minderjähriger Kinder nach § 1612a Absatz 1 des Bürgerlichen Gesetzbuchs",
+			},
+			{ID: "milog", Abbreviation: "MiLoG", Title: "Mindestlohngesetz", GIIPath: "milog"},
+			{
+				ID: "milov5", Abbreviation: "MiLoV5", GIIPath: "milov5",
+				Title: "Fünfte Verordnung zur Anpassung der Höhe des Mindestlohns auf Grundlage des Mindestlohngesetzes",
+			},
+		},
+	}
+
+	tests := []struct {
+		name   string
+		phrase string
+		want   []string
+	}{
+		{
+			name:   "BGB genitive phrase excludes citing MinUhV",
+			phrase: "Bürgerlichen Gesetzbuchs",
+			want:   []string{"bgb"},
+		},
+		{
+			name:   "MiLoG genitive phrase excludes citing MiLoV5",
+			phrase: "Mindestlohngesetzes",
+			want:   []string{"milog"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := catalog.ByTitlePhrase(tt.phrase)
+			if len(got) != len(tt.want) {
+				t.Fatalf("ByTitlePhrase(%q)=%v want %v", tt.phrase, got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Fatalf("ByTitlePhrase(%q)=%v want %v", tt.phrase, got, tt.want)
+				}
+			}
+		})
+	}
+}
+
 func TestLooksLikeVerordnung(t *testing.T) {
 	tests := []struct {
 		name string
@@ -61,6 +109,49 @@ func TestLooksLikeVerordnung(t *testing.T) {
 				t.Fatalf("LooksLikeVerordnung()=%v want %v for %+v", got, tt.want, tt.law)
 			}
 		})
+	}
+}
+
+func TestIngestLawXML_MinUhV_discoversBGB(t *testing.T) {
+	st := newMemIngestStore()
+	lookup := CatalogLookup{
+		Laws: []domain.Law{
+			{ID: "bgb", Abbreviation: "BGB", Title: "Bürgerliches Gesetzbuch", GIIPath: "bgb"},
+			{
+				ID: "minuhv", Abbreviation: "MinUhV", GIIPath: "minuhv",
+				Title: "Verordnung zur Festlegung des Mindestunterhalts minderjähriger Kinder nach § 1612a Absatz 1 des Bürgerlichen Gesetzbuchs",
+			},
+		},
+	}
+	law := domain.Law{
+		ID:           "minuhv",
+		Abbreviation: "MinUhV",
+		Title:        "Verordnung zur Festlegung des Mindestunterhalts minderjähriger Kinder nach § 1612a Absatz 1 des Bürgerlichen Gesetzbuchs",
+		GIIPath:      "minuhv",
+	}
+	xmlData := fixtures.MustRead("minuhv_snippet.xml")
+
+	n, err := IngestLawXML(st, lookup, law, xmlData)
+	if err != nil {
+		t.Fatalf("IngestLawXML: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("nLinks=%d want 1; discovered=%+v", n, st.discovered)
+	}
+
+	edges := st.discovered["bgb|minuhv"]
+	if len(edges) != 1 {
+		t.Fatalf("discovered edges=%d want 1; all=%+v", len(edges), st.discovered)
+	}
+	e := edges[0]
+	if e.ParentLawID != "bgb" {
+		t.Fatalf("ParentLawID=%q want bgb", e.ParentLawID)
+	}
+	if e.SectionHint != "§ 1612a" {
+		t.Fatalf("SectionHint=%q want § 1612a", e.SectionHint)
+	}
+	if e.Confidence != ConfidenceHigh {
+		t.Fatalf("Confidence=%q want high", e.Confidence)
 	}
 }
 

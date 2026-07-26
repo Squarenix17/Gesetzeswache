@@ -49,6 +49,97 @@ func TestParseErmaechtigung_PBAV_withAmendmentClause(t *testing.T) {
 	}
 }
 
+func TestParseErmaechtigung_LAG_FassungTrim(t *testing.T) {
+	tests := []struct {
+		name         string
+		text         string
+		wantPhrase   string
+		wantSection  string
+		wantParentID string
+	}{
+		{
+			name:         "fassung clause without date",
+			text:         "Auf Grund des § 267 des Lastenausgleichsgesetzes in der Fassung der Bekanntmachung",
+			wantPhrase:   "Lastenausgleichsgesetzes",
+			wantSection:  "267",
+			wantParentID: "lag",
+		},
+		{
+			name:         "fassung clause with vom date",
+			text:         "Auf Grund des § 267 des Lastenausgleichsgesetzes in der Fassung der Bekanntmachung vom 1. Januar 1990",
+			wantPhrase:   "Lastenausgleichsgesetzes",
+			wantSection:  "267",
+			wantParentID: "lag",
+		},
+	}
+
+	lookup := CatalogLookup{
+		Laws: []domain.Law{
+			{ID: "lag", Abbreviation: "LAG", Title: "Gesetz über den Lastenausgleich", GIIPath: "lag"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseErmaechtigung(tt.text)
+			if len(got) != 1 {
+				t.Fatalf("len(got)=%d want 1; got=%+v", len(got), got)
+			}
+			e := got[0]
+			if e.Section != tt.wantSection {
+				t.Fatalf("Section=%q want %q", e.Section, tt.wantSection)
+			}
+			if !containsFold(e.LawTitlePhrase, tt.wantPhrase) {
+				t.Fatalf("LawTitlePhrase=%q want containing %q", e.LawTitlePhrase, tt.wantPhrase)
+			}
+			if strings.Contains(strings.ToLower(e.LawTitlePhrase), "fassung") {
+				t.Fatalf("LawTitlePhrase must not contain Fassung tail: %q", e.LawTitlePhrase)
+			}
+			lawID, unique := ResolveParent(e, lookup)
+			if !unique || lawID != tt.wantParentID {
+				t.Fatalf("ResolveParent=%q unique=%v want %q unique", lawID, unique, tt.wantParentID)
+			}
+		})
+	}
+}
+
+func TestResolveParent_Lastenausgleichsgesetz_compoundGenitive(t *testing.T) {
+	lookup := CatalogLookup{
+		Laws: []domain.Law{
+			{ID: "lag", Abbreviation: "LAG", Title: "Gesetz über den Lastenausgleich", GIIPath: "lag"},
+		},
+	}
+	tests := []struct {
+		phrase string
+	}{
+		{phrase: "Lastenausgleichsgesetzes"},
+		{phrase: "Lastenausgleichsgesetz"},
+		{phrase: "Gesetzes über den Lastenausgleich"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.phrase, func(t *testing.T) {
+			e := Ermaechtigung{LawTitlePhrase: tt.phrase, Section: "267"}
+			lawID, unique := ResolveParent(e, lookup)
+			if !unique || lawID != "lag" {
+				t.Fatalf("ResolveParent=%q unique=%v want lag", lawID, unique)
+			}
+		})
+	}
+}
+
+func TestResolveParentFromChildTitle_UhAnpV_nachDemLAG(t *testing.T) {
+	lookup := CatalogLookup{
+		Laws: []domain.Law{
+			{ID: "lag", Abbreviation: "LAG", Title: "Gesetz über den Lastenausgleich", GIIPath: "lag"},
+		},
+	}
+	title := "Vierundzwanzigste Verordnung zur Anpassung der Unterhaltshilfe nach dem Lastenausgleichsgesetz"
+	lawID, unique := ResolveParentFromChildTitle(title, lookup)
+	if !unique || lawID != "lag" {
+		t.Fatalf("ResolveParentFromChildTitle=%q unique=%v want lag", lawID, unique)
+	}
+}
+
 func TestParseErmaechtigung_MiLoG(t *testing.T) {
 	text := "Auf Grund des § 11 Absatz 1 des Mindestlohngesetzes"
 

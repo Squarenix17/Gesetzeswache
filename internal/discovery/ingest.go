@@ -471,6 +471,35 @@ func IngestLawXML(st IngestStore, lookup ParentLookup, law domain.Law, xmlData [
 		}
 	}
 
+	// When body § refs lack a resolvable parent phrase (e.g. UhAnpV "des Gesetzes"),
+	// fall back once to the Verordnung title ("nach dem …gesetz"). Skip when refs
+	// carried explicit but unresolved parent phrases (ambiguous Ermächtigung).
+	if len(byParent) == 0 {
+		hadExplicitPhrase := false
+		for _, e := range refs {
+			if strings.TrimSpace(e.LawTitlePhrase) != "" || strings.TrimSpace(e.Jurabk) != "" {
+				hadExplicitPhrase = true
+				break
+			}
+		}
+		if !hadExplicitPhrase {
+			parentID, parentUnique := ResolveParentFromChildTitle(law.Title, lookup)
+			if parentUnique && parentID != "" {
+				agg := &parentAgg{}
+				hintSeen[parentID] = map[string]struct{}{}
+				for _, e := range refs {
+					if h := e.SectionHint(); h != "" {
+						if _, ok := hintSeen[parentID][h]; !ok {
+							hintSeen[parentID][h] = struct{}{}
+							agg.hints = append(agg.hints, h)
+						}
+					}
+				}
+				byParent[parentID] = agg
+			}
+		}
+	}
+
 	var toPersist []domain.DiscoveredEdge
 	for parentID, agg := range byParent {
 		sectionHint := strings.Join(agg.hints, "; ")

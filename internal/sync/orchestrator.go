@@ -126,11 +126,16 @@ func (o *Orchestrator) RunTOC(ctx context.Context) error {
 }
 
 func guessAbbr(title, slug string) string {
-	// Prefer slug uppercase if short
-	if slug != "" && len(slug) <= 12 {
-		return strings.ToUpper(slug)
+	// title kept for signature compatibility with TOC ingest (future jurabk/title hints).
+	s := strings.TrimLeft(slug, "_")
+	if s == "" {
+		return slug
 	}
-	return slug
+	// Prefer short slug uppercase (GII paths without TOC jurabk).
+	if len(s) <= 12 {
+		return strings.ToUpper(s)
+	}
+	return s
 }
 
 // RSS generic

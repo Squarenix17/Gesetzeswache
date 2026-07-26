@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<dokument>
+  <norm>
+    <metadaten>
+      <jurabk>WoGV</jurabk>
+      <langue>Wohngeldverordnung</langue>
+      <fundstelle>
+        <periodikum>BGBl I</periodikum>
+        <zitstelle>1971, 2065</zitstelle>
+      </fundstelle>
+    </metadaten>
+    <textdaten>
+      <fussnoten>
+        <Content>
+          <P>Die V wurde aufgrund d. § 36 Nr. 1 u. 2 G v. 14.12.1970 I 1637 von der Bundesregierung mit Zustimmung des Bundesrates erlassen</P>
+        </Content>
+      </fussnoten>
+    </textdaten>
+  </norm>
+  <norm>
+    <metadaten>
+      <jurabk>WoGV</jurabk>
+      <enbez>§ 2</enbez>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P>Zur Miete gehören auch Beträge, die im Zusammenhang mit dem Mietverhältnis auf Grund eines Vertrages mit dem Vermieter zu zahlen sind.</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+</dokument>

@@ -64,6 +64,36 @@ func init() {
 	}
 }
 
+// ResolveParentFromChildTitle derives a parent law from a Verordnung title when the
+// preamble only names § refs (abbreviated "G v." fussnoten). Titles ending in
+// "…verordnung" yield "…gesetz" / "…gesetzes" candidates; non-unique or unmatched
+// phrases return empty.
+func ResolveParentFromChildTitle(childTitle string, lookup ParentLookup) (lawID string, unique bool) {
+	for _, phrase := range parentPhrasesFromVerordnungTitle(childTitle) {
+		if id, ok := uniqueFrom(lookup.ByTitlePhrase(phrase)); ok {
+			return id, true
+		}
+	}
+	return "", false
+}
+
+func parentPhrasesFromVerordnungTitle(title string) []string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return nil
+	}
+	lower := strings.ToLower(title)
+	const suffix = "verordnung"
+	if !strings.HasSuffix(lower, suffix) {
+		return nil
+	}
+	base := strings.TrimSpace(title[:len(title)-len(suffix)])
+	if base == "" {
+		return nil
+	}
+	return []string{base + "gesetz", base + "gesetzes"}
+}
+
 // ResolveParent returns a canonical parent law ID when uniquely resolvable.
 // Precise signals (jurabk + built-in book phrases) win over fuzzy title search so
 // common tokens like "Sozialgesetzbuch" do not make SGB XI-class parents ambiguous.

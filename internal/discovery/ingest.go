@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/Squarenix17/gesetzeswache/internal/citation"
 	"github.com/Squarenix17/gesetzeswache/internal/domain"
@@ -149,37 +150,115 @@ func intToRoman(n int) (string, bool) {
 }
 
 // ByTitlePhrase returns law IDs whose title matches the phrase.
-// Only exact title match, title-contains-phrase, or phrase-contains-full-title
-// when the title token is substantive (avoids short false positives).
+// Strong matches win over weak ones:
+//  1. exact title, phrase-contains-full-title, or title words covered by phrase (inflection-tolerant)
+//  2. else title-contains-phrase
+// Both tiers skip Verordnungen (citing ordinances are not Ermächtigung parents).
 func (c CatalogLookup) ByTitlePhrase(phrase string) []string {
 	key := normalize.Key(phrase)
 	if len(key) < 12 {
 		// Avoid matching ubiquitous tokens like "sozialgesetzbuch".
 		return nil
 	}
-	var out []string
-	seen := map[string]struct{}{}
+	var strong, weak []string
+	seenStrong := map[string]struct{}{}
+	seenWeak := map[string]struct{}{}
+	add := func(dst *[]string, seen map[string]struct{}, id string) {
+		id = normalize.Key(id)
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		*dst = append(*dst, id)
+	}
 	for _, law := range c.Laws {
 		titleKey := normalize.Key(law.Title)
 		if len(titleKey) < 8 {
 			continue
 		}
-		match := titleKey == key || strings.Contains(titleKey, key)
-		// Genitive phrases ("Berufsbildungsgesetzes") contain the nominative title.
-		if !match && len(titleKey) >= 12 && strings.Contains(key, titleKey) {
-			match = true
-		}
-		if !match {
+		if titleKey == key ||
+			(len(titleKey) >= 12 && strings.Contains(key, titleKey)) ||
+			titleWordsCoveredByPhrase(law.Title, phrase) {
+			if LooksLikeVerordnung(law) {
+				continue
+			}
+			add(&strong, seenStrong, law.ID)
 			continue
 		}
-		id := normalize.Key(law.ID)
-		if _, ok := seen[id]; ok {
-			continue
+		if strings.Contains(titleKey, key) && !LooksLikeVerordnung(law) {
+			add(&weak, seenWeak, law.ID)
 		}
-		seen[id] = struct{}{}
-		out = append(out, id)
 	}
+	if len(strong) > 0 {
+		return strong
+	}
+	return weak
+}
+
+// titleWordsCoveredByPhrase reports whether every substantive word of title
+// appears (with light German inflection folding) as a word in phrase.
+// Short statute titles ("Bürgerliches Gesetzbuch") match genitive phrases
+// ("Bürgerlichen Gesetzbuchs"); long citing ordinance titles do not.
+func titleWordsCoveredByPhrase(title, phrase string) bool {
+	titleWords := letterWords(title)
+	if len(titleWords) == 0 {
+		return false
+	}
+	phraseStems := map[string]struct{}{}
+	for _, w := range letterWords(phrase) {
+		phraseStems[germanStemKey(normalize.Key(w))] = struct{}{}
+	}
+	matched := 0
+	for _, w := range titleWords {
+		k := normalize.Key(w)
+		if len(k) < 4 {
+			continue
+		}
+		stem := germanStemKey(k)
+		if _, ok := phraseStems[stem]; !ok {
+			return false
+		}
+		matched++
+	}
+	return matched > 0
+}
+
+func letterWords(s string) []string {
+	var out []string
+	var b strings.Builder
+	flush := func() {
+		if b.Len() == 0 {
+			return
+		}
+		out = append(out, b.String())
+		b.Reset()
+	}
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			continue
+		}
+		flush()
+	}
+	flush()
 	return out
+}
+
+// germanStemKey lightly folds common German adjective/noun endings on a
+// normalize.Key string so "buergerliches" and "buergerlichen" share a stem.
+func germanStemKey(k string) string {
+	if len(k) < 5 {
+		return k
+	}
+	for _, suf := range []string{"lichen", "liches", "ischen", "isches", "ischem", "ischer", "en", "em", "er", "es", "e", "s"} {
+		if strings.HasSuffix(k, suf) && len(k)-len(suf) >= 4 {
+			return k[:len(k)-len(suf)]
+		}
+	}
+	return k
 }
 
 // LooksLikeVerordnung reports whether a law is likely a Verordnung.

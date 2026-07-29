@@ -3,6 +3,7 @@ package httpx
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -39,8 +40,8 @@ func NewWithTransport(timeout time.Duration, minGap time.Duration, maxBytes int6
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	if minGap <= 0 {
-		minGap = 200 * time.Millisecond
+	if minGap < 0 {
+		minGap = 0
 	}
 	if maxBytes <= 0 {
 		maxBytes = 32 << 20
@@ -64,9 +65,22 @@ func NewWithTransport(timeout time.Duration, minGap time.Duration, maxBytes int6
 		allowed:  allowed,
 		last:     map[string]time.Time{},
 	}
+	transport := rt
+	if transport == nil {
+		transport = &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           c.dialContext,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+		}
+	}
 	c.hc = &http.Client{
 		Timeout:   timeout,
-		Transport: rt,
+		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
 				return fmt.Errorf("too many redirects")
@@ -75,6 +89,81 @@ func NewWithTransport(timeout time.Duration, minGap time.Duration, maxBytes int6
 		},
 	}
 	return c
+}
+
+// ValidateURL checks that rawURL satisfies the same SSRF rules as outbound GET.
+func ValidateURL(rawURL string, allowHosts ...string) error {
+	c := New(30*time.Second, 200*time.Millisecond, 1<<20, allowHosts...)
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return err
+	}
+	return c.validateURL(u)
+}
+
+// IsBlockedIP reports whether ip must not be dialed (loopback, private, link-local, unspecified).
+func IsBlockedIP(ip net.IP) bool {
+	if ip == nil {
+		return true
+	}
+	// NAT64 well-known prefix 64:ff9b::/96 — decode embedded IPv4 and re-check.
+	if len(ip) == net.IPv6len && ip[0] == 0x00 && ip[1] == 0x64 && ip[2] == 0xff && ip[3] == 0x9b {
+		embedded := net.IP(append([]byte(nil), ip[12:16]...))
+		if embedded.To4() != nil && IsBlockedIP(embedded) {
+			return true
+		}
+	}
+	ip = ip.To16()
+	if ip == nil {
+		return true
+	}
+	if ip.IsUnspecified() || ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+		return true
+	}
+	if v4 := ip.To4(); v4 != nil {
+		// CGNAT 100.64.0.0/10
+		if v4[0] == 100 && v4[1] >= 64 && v4[1] <= 127 {
+			return true
+		}
+		// Explicit metadata / link-local IPv4 range 169.254.0.0/16.
+		if v4[0] == 169 && v4[1] == 254 {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Client) dialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("no addresses for host %q", host)
+	}
+	var blocked error
+	for _, ipa := range ips {
+		if IsBlockedIP(ipa.IP) {
+			blocked = fmt.Errorf("resolved to blocked IP for host %q", host)
+			continue
+		}
+		d := net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+		conn, err := d.DialContext(ctx, network, net.JoinHostPort(ipa.IP.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		if blocked == nil {
+			blocked = err
+		}
+	}
+	if blocked != nil {
+		return nil, blocked
+	}
+	return nil, fmt.Errorf("dial failed for %s", addr)
 }
 
 func (c *Client) validateURL(u *url.URL) error {

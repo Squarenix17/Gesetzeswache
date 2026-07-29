@@ -6,6 +6,8 @@ import (
 	"io"
 	"regexp"
 	"strings"
+
+	"github.com/Squarenix17/gesetzeswache/internal/xmlsafe"
 )
 
 var (
@@ -18,6 +20,9 @@ var (
 // fundstelle (periodikum + zit/zitstelle) formatted as a parseable BGBl citation.
 // Returns empty string when absent. Does not invent citations.
 func ExtractStandRaw(xmlData []byte) string {
+	if err := xmlsafe.RejectUnsafeXML(xmlData); err != nil {
+		return ""
+	}
 	if raw := extractStandangabe(xmlData); raw != "" {
 		return raw
 	}

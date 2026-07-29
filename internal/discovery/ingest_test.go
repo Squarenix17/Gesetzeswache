@@ -11,17 +11,6 @@ import (
 	"github.com/Squarenix17/gesetzeswache/internal/test/fixtures"
 )
 
-func TestRejectUnsafeXML_EntityBlocked(t *testing.T) {
-	xmlData := []byte(`<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe "xxe">]><dokumente></dokumente>`)
-	if err := rejectUnsafeXML(xmlData); err == nil {
-		t.Fatal("expected error for internal ENTITY")
-	}
-	safe := []byte(`<?xml version="1.0"?><!DOCTYPE dokumente SYSTEM "http://www.gesetze-im-internet.de/dtd/1.01/gii-norm.dtd"><dokumente></dokumente>`)
-	if err := rejectUnsafeXML(safe); err != nil {
-		t.Fatalf("SYSTEM doctype should be allowed: %v", err)
-	}
-}
-
 func TestCatalogLookup_ByTitlePhrase_prefersPhraseContainsTitle_overCitingVerordnung(t *testing.T) {
 	catalog := CatalogLookup{
 		Laws: []domain.Law{

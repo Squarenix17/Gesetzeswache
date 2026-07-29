@@ -16,6 +16,7 @@ import (
 	"github.com/Squarenix17/gesetzeswache/internal/giiurl"
 	"github.com/Squarenix17/gesetzeswache/internal/normalize"
 	"github.com/Squarenix17/gesetzeswache/internal/store"
+	"github.com/Squarenix17/gesetzeswache/internal/xmlsafe"
 )
 
 // IngestStore persists BGBl index rows and discovered parent→child edges.
@@ -153,6 +154,7 @@ func intToRoman(n int) (string, bool) {
 // Strong matches win over weak ones:
 //  1. exact title, phrase-contains-full-title, or title words covered by phrase (inflection-tolerant)
 //  2. else title-contains-phrase
+//
 // Both tiers skip Verordnungen (citing ordinances are not Ermächtigung parents).
 func (c CatalogLookup) ByTitlePhrase(phrase string) []string {
 	key := normalize.Key(phrase)
@@ -279,22 +281,12 @@ func LooksLikeVerordnung(law domain.Law) bool {
 
 const preambleScanLimit = 8 << 10 // ~8KB
 
-func rejectUnsafeXML(xmlData []byte) error {
-	// GII norms declare an external SYSTEM DTD; that is fine.
-	// Reject internal entity declarations (billion-laughs style expansion).
-	lower := bytes.ToLower(xmlData)
-	if bytes.Contains(lower, []byte("<!entity")) {
-		return fmt.Errorf("xml contains entity declarations")
-	}
-	return nil
-}
-
 // ExtractPreambleText streams XML CharData and returns text containing an Ermächtigung
 // marker ("Auf Grund" / "aufgrund"), or the first ~8KB of norm text content when no
 // marker is found. Marker-bearing <fussnoten> within <norm> wins over <text> so body
 // phrases like "auf Grund eines Vertrages" do not mask historical footnote Ermächtigungen.
 func ExtractPreambleText(xmlData []byte) string {
-	if err := rejectUnsafeXML(xmlData); err != nil {
+	if err := xmlsafe.RejectUnsafeXML(xmlData); err != nil {
 		return ""
 	}
 	dec := xml.NewDecoder(bytes.NewReader(xmlData))
@@ -409,7 +401,7 @@ func IngestLawXML(st IngestStore, lookup ParentLookup, law domain.Law, xmlData [
 	if !giiurl.ValidSlug(law.GIIPath) {
 		return 0, fmt.Errorf("invalid gii slug %q", law.GIIPath)
 	}
-	if err := rejectUnsafeXML(xmlData); err != nil {
+	if err := xmlsafe.RejectUnsafeXML(xmlData); err != nil {
 		return 0, err
 	}
 	fundstelleOK := false

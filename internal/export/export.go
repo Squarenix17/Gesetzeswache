@@ -3,7 +3,7 @@ package export
 
 import (
 	"bytes"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- deterministic export unit IDs, not a security primitive
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Squarenix17/gesetzeswache/internal/domain"
+	"github.com/Squarenix17/gesetzeswache/internal/xmlsafe"
 )
 
 const (
@@ -243,6 +244,9 @@ func isOpeningPunct(r rune) bool {
 }
 
 func extractUnits(lawID, abbr string, data []byte) ([]Unit, bool, string, error) {
+	if err := xmlsafe.RejectUnsafeXML(data); err != nil {
+		return nil, false, "", err
+	}
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	var units []Unit
 	ambiguous := false
@@ -503,7 +507,7 @@ func stripTags(s string) string {
 }
 
 func unitID(lawID, path, text string) string {
-	h := sha1.Sum([]byte(lawID + "|" + path + "|" + text))
+	h := sha1.Sum([]byte(lawID + "|" + path + "|" + text)) // #nosec G401 -- non-cryptographic content-ID hash
 	return lawID + "-" + hex.EncodeToString(h[:8])
 }
 

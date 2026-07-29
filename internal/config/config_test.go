@@ -49,6 +49,44 @@ func TestLoad_FortschreibungFamiliesDefault(t *testing.T) {
 	}
 }
 
+func TestLoad_DefaultURLsValid(t *testing.T) {
+	t.Setenv("GEW_GII_BASE", "")
+	t.Setenv("GEW_GII_TOC_URL", "")
+	t.Setenv("GEW_GII_FEED_URL", "")
+	t.Setenv("GEW_BGBL_FEED1_URL", "")
+	t.Setenv("GEW_BGBL_FEED2_URL", "")
+	t.Setenv("GEW_ELI_BASE", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.GIIBase == "" {
+		t.Fatal("expected default GIIBase")
+	}
+}
+
+func TestLoad_InvalidLiteralIPURL(t *testing.T) {
+	t.Setenv("GEW_GII_BASE", "http://169.254.169.254/x")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected load error for literal IP URL")
+	}
+}
+
+func TestLoad_ValidHTTPSOverride(t *testing.T) {
+	t.Setenv("GEW_GII_BASE", "https://www.gesetze-im-internet.de")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.GIIBase != "https://www.gesetze-im-internet.de" {
+		t.Fatalf("GIIBase=%q", cfg.GIIBase)
+	}
+}
+
 func TestLoad_DiscoveryEnv_invalidBoolFallsBack(t *testing.T) {
 	t.Setenv("GEW_DISCOVERY_ENABLED", "not-a-bool")
 	t.Setenv("GEW_DISCOVERY_MAX_PER_CYCLE", "not-int")

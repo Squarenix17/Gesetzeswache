@@ -12,14 +12,7 @@
 
 Please use **GitHub Private Vulnerability Reporting** (Security → Report a vulnerability) on this repository when available.
 
-If that is not an option, email the maintainer listed in the README Contact section with:
-
-- A short description of the issue
-- Steps to reproduce
-- Affected version / commit
-- Impact assessment (if known)
-
-Do **not** open a public issue for sensitive vulnerabilities until a fix or advisory is ready.
+For non-sensitive issues, use GitHub Issues. Do **not** open a public issue for sensitive vulnerabilities until a fix or advisory is ready.
 
 ## Out of scope
 

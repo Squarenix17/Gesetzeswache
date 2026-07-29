@@ -265,9 +265,7 @@ Distributed under the MIT License. See [`LICENSE`](LICENSE) for more information
 <!-- CONTACT -->
 ## Contact
 
-Gabriele Ughetto - gabriele.ughetto@ovgu.de - gabriele.ughetto2000@gmail.com \
-Telegram - [@Squarenix](https://t.me/squarenix)
-
+Gabriele Ughetto · Telegram [@Squarenix](https://t.me/squarenix)  
 Issues: [github.com/Squarenix17/gesetzeswache/issues](https://github.com/Squarenix17/gesetzeswache/issues)
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>

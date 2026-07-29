@@ -19,7 +19,7 @@ func Dir() string {
 
 // MustRead loads a fixture file from Dir() and panics on error.
 func MustRead(name string) []byte {
-	data, err := os.ReadFile(filepath.Join(Dir(), name))
+	data, err := os.ReadFile(filepath.Join(Dir(), name)) // #nosec G304 -- test fixture names are package-local constants
 	if err != nil {
 		panic(err)
 	}

@@ -13,7 +13,7 @@ import (
 // Run executes a CLI command against the in-process service.
 func Run(ctx context.Context, svc *service.Service, args []string) int {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: gew <serve|resolve|freshness|stale|recheck|sync-status|export|mcp> ...")
+		PrintUsage()
 		return 2
 	}
 	switch args[0] {
@@ -60,7 +60,12 @@ func Run(ctx context.Context, svc *service.Service, args []string) int {
 		res, err := svc.ExportText(ctx, q, formats, opts)
 		return printJSON(res, err)
 	default:
+		if args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
+			PrintUsage()
+			return 0
+		}
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", args[0])
+		PrintUsage()
 		return 2
 	}
 }

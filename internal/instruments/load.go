@@ -27,7 +27,7 @@ func LoadTSV(path string) (*Catalog, error) {
 	if path == "" {
 		return c, nil
 	}
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path is operator-controlled config (variants TSV)
 	if err != nil {
 		return nil, err
 	}

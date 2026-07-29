@@ -6,15 +6,15 @@ import (
 )
 
 var (
-	reSectionRef   = regexp.MustCompile(`(?i)§\s*(\d+[a-zA-Z]?)`)
-	reAbsatz       = regexp.MustCompile(`(?i)\bAbsatz\s+(\d+[a-zA-Z]?)\b`)
-	reSatz         = regexp.MustCompile(`(?i)\bSatz\s+(\d+)\b`)
-	reJurabk       = regexp.MustCompile(`(?i)\bSGB\s+([IVXLC]+|\d+)\b`)
-	reAufGrund     = regexp.MustCompile(`(?i)\b(?:auf\s+grund|aufgrund)\b`)
-	reDashDesPara  = regexp.MustCompile(`(?i)[–\-]\s*des\s+§`)
-	reDesPara      = regexp.MustCompile(`(?i)des\s+§`)
-	reAbbrDesPara  = regexp.MustCompile(`(?i)\bd\.\s*§`)
-	reVerordnet    = regexp.MustCompile(`(?i)\bverordnet\s+(?:die|das)\b`)
+	reSectionRef  = regexp.MustCompile(`(?i)§\s*(\d+[a-zA-Z]?)`)
+	reAbsatz      = regexp.MustCompile(`(?i)\bAbsatz\s+(\d+[a-zA-Z]?)\b`)
+	reSatz        = regexp.MustCompile(`(?i)\bSatz\s+(\d+)\b`)
+	reJurabk      = regexp.MustCompile(`(?i)\bSGB\s+([IVXLC]+|\d+)\b`)
+	reAufGrund    = regexp.MustCompile(`(?i)\b(?:auf\s+grund|aufgrund)\b`)
+	reDashDesPara = regexp.MustCompile(`(?i)[–\-]\s*des\s+§`)
+	reDesPara     = regexp.MustCompile(`(?i)des\s+§`)
+	reAbbrDesPara = regexp.MustCompile(`(?i)\bd\.\s*§`)
+	reVerordnet   = regexp.MustCompile(`(?i)\bverordnet\s+(?:die|das)\b`)
 )
 
 type sectionRef struct {

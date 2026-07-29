@@ -108,7 +108,7 @@ func TestWritePrometheusFormat(t *testing.T) {
 
 func TestInvalidMetricNameRejected(t *testing.T) {
 	tests := []struct {
-		name  string
+		name   string
 		metric string
 	}{
 		{name: "starts with digit", metric: "1invalid"},

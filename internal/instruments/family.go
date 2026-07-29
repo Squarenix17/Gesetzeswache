@@ -40,7 +40,7 @@ func LoadFamiliesTSV(path string) (*FamilyCatalog, error) {
 	if path == "" {
 		return c, nil
 	}
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path is operator-controlled config (families TSV)
 	if err != nil {
 		return nil, err
 	}

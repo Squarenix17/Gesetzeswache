@@ -29,7 +29,7 @@ func TestCollectMetrics_gauges(t *testing.T) {
 	}
 
 	seedCatalog(t, svc, mt)
-	_ = svc.Store.SetMetaTime("last_bgbl_feed_success", time.Now().UTC())
+	seedSyncFreshMeta(t, svc, time.Now().UTC())
 	svc.CollectMetrics(reg)
 
 	if reg.GaugeValue(metrics.MetricCatalogReady, nil) != 1 {

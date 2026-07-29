@@ -1,6 +1,8 @@
 module github.com/Squarenix17/gesetzeswache
 
-go 1.21
+go 1.24
+
+toolchain go1.24.5
 
 require go.etcd.io/bbolt v1.3.9
 

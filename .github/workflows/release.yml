@@ -1,0 +1,86 @@
+name: release
+on:
+  push:
+    tags:
+      - "v*"
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+      - name: Install govulncheck
+        run: GOTOOLCHAIN=local go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+      - name: govulncheck
+        run: govulncheck ./...
+      - name: Test
+        run: go test ./...
+
+  build:
+    needs: verify
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          out="gew_${GOOS}_${GOARCH}"
+          go build -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "${out}" ./cmd/gesetzeswache
+          sha256sum "${out}" >> "SHA256SUMS-${{ matrix.goarch }}"
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.goarch }}
+          path: |
+            gew_${{ matrix.goos }}_${{ matrix.goarch }}
+            SHA256SUMS-${{ matrix.goarch }}
+
+  sbom:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: anchore/syft-action@v0
+        with:
+          path: .
+          output-format: spdx-json
+          output-file: sbom.spdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.spdx.json
+
+  release:
+    needs: [build, sbom]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binaries-*
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: sbom
+      - name: Merge checksums
+        run: cat SHA256SUMS-* | sort -u > SHA256SUMS && rm -f SHA256SUMS-*
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            gew_linux_amd64
+            gew_linux_arm64
+            SHA256SUMS
+            sbom.spdx.json

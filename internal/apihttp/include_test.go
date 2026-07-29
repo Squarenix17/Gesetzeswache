@@ -36,6 +36,7 @@ func TestResolve_includePastQuery(t *testing.T) {
 	_ = st.UpsertLaws([]domain.Law{law})
 	now := time.Now().UTC()
 	_ = st.SetMetaTime("last_toc_success", now)
+	_ = st.SetMetaTime("last_gii_feed_success", now)
 	_ = st.SetMetaTime("last_bgbl_feed_success", now)
 	_ = st.UpsertStand(citation.Parse("milog", "Zuletzt geändert durch Art. 8 Abs. 3 G v. 12.5.2026 I Nr. 137"))
 	_ = st.UpsertIssue(domain.GazetteIssue{

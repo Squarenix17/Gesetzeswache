@@ -64,11 +64,11 @@ type LinkedInstrument struct {
 	Notes         string `json:"notes,omitempty"`
 	EffectiveFrom string `json:"effective_from,omitempty"` // YYYY-MM-DD Inkrafttreten
 	SectionHint   string `json:"section_hint,omitempty"`
-	Status        string `json:"status,omitempty"`   // past|current|future
-	Coverage      string `json:"coverage,omitempty"` // "section" default
-	Source        string `json:"source,omitempty"`      // seeded | discovered
-	Confidence    string `json:"confidence,omitempty"`  // high | medium | low
-	EdgeType      string `json:"edge_type,omitempty"`   // ermaechtigung | bgbl_plus_plus
+	Status        string `json:"status,omitempty"`     // past|current|future
+	Coverage      string `json:"coverage,omitempty"`   // "section" default
+	Source        string `json:"source,omitempty"`     // seeded | discovered
+	Confidence    string `json:"confidence,omitempty"` // high | medium | low
+	EdgeType      string `json:"edge_type,omitempty"`  // ermaechtigung | bgbl_plus_plus
 	// Pointer fields (filled when include=linked):
 	ResolveOK bool   `json:"resolve_ok,omitempty"`
 	GIIURL    string `json:"gii_url,omitempty"`
@@ -103,17 +103,17 @@ type StandCitation struct {
 
 // GazetteIssue is an observed BGBl promulgation.
 type GazetteIssue struct {
-	ID                 string              `json:"id"` // e.g. "BGBl-1/2026/209"
-	Teil               int                 `json:"teil"`
-	Year               int                 `json:"year"`
-	Number             string              `json:"number"`
-	PublishedAt        *time.Time          `json:"published_at,omitempty"`
-	Title              string              `json:"title,omitempty"`
-	ELIURL             string              `json:"eli_url,omitempty"`
-	DiscoverySources   []string            `json:"discovery_sources,omitempty"`
-	ExistenceConfidence string             `json:"existence_confidence"` // high|low
-	Matched            bool                `json:"matched"`
-	FirstSeenAt        time.Time           `json:"first_seen_at"`
+	ID                  string     `json:"id"` // e.g. "BGBl-1/2026/209"
+	Teil                int        `json:"teil"`
+	Year                int        `json:"year"`
+	Number              string     `json:"number"`
+	PublishedAt         *time.Time `json:"published_at,omitempty"`
+	Title               string     `json:"title,omitempty"`
+	ELIURL              string     `json:"eli_url,omitempty"`
+	DiscoverySources    []string   `json:"discovery_sources,omitempty"`
+	ExistenceConfidence string     `json:"existence_confidence"` // high|low
+	Matched             bool       `json:"matched"`
+	FirstSeenAt         time.Time  `json:"first_seen_at"`
 }
 
 // IssueLawLink connects a gazette issue to an affected law.
@@ -126,13 +126,13 @@ type IssueLawLink struct {
 
 // FreshnessRecord is the current freshness evaluation for a law.
 type FreshnessRecord struct {
-	LawID              string             `json:"law_id"`
-	State              FreshnessState     `json:"state"`
-	Confidence         string             `json:"confidence"` // high|medium|low
-	Method             VerificationMethod `json:"method"`
-	EvaluatedAt        time.Time          `json:"evaluated_at"`
-	NewerIssueIDs      []string           `json:"newer_issue_ids,omitempty"`
-	Rationale          string             `json:"rationale,omitempty"`
+	LawID         string             `json:"law_id"`
+	State         FreshnessState     `json:"state"`
+	Confidence    string             `json:"confidence"` // high|medium|low
+	Method        VerificationMethod `json:"method"`
+	EvaluatedAt   time.Time          `json:"evaluated_at"`
+	NewerIssueIDs []string           `json:"newer_issue_ids,omitempty"`
+	Rationale     string             `json:"rationale,omitempty"`
 }
 
 // SyncAttempt records one background sync job outcome.
@@ -148,14 +148,14 @@ type SyncAttempt struct {
 
 // SyncStatus summarizes last successful sync times per source.
 type SyncStatus struct {
-	CatalogReady          bool       `json:"catalog_ready"`
-	LastTOCSuccess        *time.Time `json:"last_toc_success,omitempty"`
-	LastGIIFeedSuccess    *time.Time `json:"last_gii_feed_success,omitempty"`
-	LastBGBlFeedSuccess   *time.Time `json:"last_bgbl_feed_success,omitempty"`
-	LastELIProbeSuccess   *time.Time `json:"last_eli_probe_success,omitempty"`
-	LastReconcileAt       *time.Time `json:"last_reconcile_at,omitempty"`
-	DataFresh             bool       `json:"data_fresh"` // within max-age for confirmed claims
-	MaxAge                DurationJSON `json:"max_age"`
+	CatalogReady        bool         `json:"catalog_ready"`
+	LastTOCSuccess      *time.Time   `json:"last_toc_success,omitempty"`
+	LastGIIFeedSuccess  *time.Time   `json:"last_gii_feed_success,omitempty"`
+	LastBGBlFeedSuccess *time.Time   `json:"last_bgbl_feed_success,omitempty"`
+	LastELIProbeSuccess *time.Time   `json:"last_eli_probe_success,omitempty"`
+	LastReconcileAt     *time.Time   `json:"last_reconcile_at,omitempty"`
+	DataFresh           bool         `json:"data_fresh"` // within max-age for confirmed claims
+	MaxAge              DurationJSON `json:"max_age"`
 }
 
 // DurationJSON is a duration exposed as string in JSON helpers elsewhere.

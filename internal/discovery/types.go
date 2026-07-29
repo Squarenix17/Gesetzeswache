@@ -3,9 +3,9 @@ package discovery
 
 // Ermaechtigung is one statutory authorization reference from an ordinance preamble.
 type Ermaechtigung struct {
-	Section, Absatz, Satz string
+	Section, Absatz, Satz  string
 	LawTitlePhrase, Jurabk string
-	Raw                     string
+	Raw                    string
 }
 
 // SectionHint returns the normalized section citation (e.g. "§ 55").

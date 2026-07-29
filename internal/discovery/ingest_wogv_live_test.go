@@ -8,6 +8,9 @@ import (
 )
 
 func TestIngestLawXML_WoGV_realXML(t *testing.T) {
+	if os.Getenv("GEW_LIVE_INGEST") != "1" {
+		t.Skip("set GEW_LIVE_INGEST=1 to run live DB mutation test")
+	}
 	data, err := os.ReadFile("/tmp/wogv.xml")
 	if err != nil {
 		t.Skip("no /tmp/wogv.xml")

@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -43,9 +44,9 @@ type Service struct {
 
 // Envelope is the API response shape.
 type Envelope struct {
-	Success bool        `json:"success"`
-	Data    any         `json:"data"`
-	Error   *string     `json:"error"`
+	Success bool    `json:"success"`
+	Data    any     `json:"data"`
+	Error   *string `json:"error"`
 }
 
 type Suggestion struct {
@@ -56,19 +57,19 @@ type Suggestion struct {
 }
 
 type FreshnessMeta struct {
-	State              domain.FreshnessState     `json:"state"`
-	Confidence         string                    `json:"confidence"`
-	Method             domain.VerificationMethod `json:"method"`
-	EvaluatedAt        time.Time                 `json:"evaluated_at"`
-	LastTOCSuccess     *time.Time                `json:"last_toc_success,omitempty"`
-	LastBGBlSuccess    *time.Time                `json:"last_bgbl_success,omitempty"`
-	NewerIssueIDs      []string                  `json:"newer_issue_ids,omitempty"`
-	Rationale          string                    `json:"rationale,omitempty"`
-	Stand              *domain.StandCitation     `json:"stand,omitempty"`
-	GIIURL             string                    `json:"gii_url,omitempty"`
-	BGBlPointers       []string                  `json:"bgbl_pointers,omitempty"`
-	LinkedInstruments  []domain.LinkedInstrument `json:"linked_instruments,omitempty"`
-	InstrumentRefs     []domain.InstrumentRef    `json:"instrument_refs,omitempty"`
+	State             domain.FreshnessState     `json:"state"`
+	Confidence        string                    `json:"confidence"`
+	Method            domain.VerificationMethod `json:"method"`
+	EvaluatedAt       time.Time                 `json:"evaluated_at"`
+	LastTOCSuccess    *time.Time                `json:"last_toc_success,omitempty"`
+	LastBGBlSuccess   *time.Time                `json:"last_bgbl_success,omitempty"`
+	NewerIssueIDs     []string                  `json:"newer_issue_ids,omitempty"`
+	Rationale         string                    `json:"rationale,omitempty"`
+	Stand             *domain.StandCitation     `json:"stand,omitempty"`
+	GIIURL            string                    `json:"gii_url,omitempty"`
+	BGBlPointers      []string                  `json:"bgbl_pointers,omitempty"`
+	LinkedInstruments []domain.LinkedInstrument `json:"linked_instruments,omitempty"`
+	InstrumentRefs    []domain.InstrumentRef    `json:"instrument_refs,omitempty"`
 }
 
 type ResolveResult struct {
@@ -85,6 +86,9 @@ func (s *Service) Resolve(ctx context.Context, query string, opts IncludeOpts) (
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return ResolveResult{}, fmt.Errorf("query required")
+	}
+	if err := validateQueryLength(query); err != nil {
+		return ResolveResult{}, err
 	}
 	snap := s.Search.Current()
 	if snap == nil || len(mustLaws(s)) == 0 {
@@ -136,6 +140,9 @@ func (s *Service) Freshness(ctx context.Context, lawID string, opts IncludeOpts)
 	if lawID == "" {
 		return FreshnessMeta{}, fmt.Errorf("law id required")
 	}
+	if err := validateQueryLength(lawID); err != nil {
+		return FreshnessMeta{}, err
+	}
 	// allow abbreviation resolve
 	if _, ok, _ := s.Store.GetLaw(lawID); !ok {
 		if best, _ := s.Search.Current().Resolve(lawID, s.CFG.MatchThreshold); best != nil {
@@ -155,7 +162,10 @@ func (s *Service) freshnessFor(lawID string, opts IncludeOpts) (FreshnessMeta, e
 	}
 	stand, _, _ := s.Store.GetStand(lawID)
 	stand = s.repairStandIfNeeded(lawID, stand)
-	links, _ := s.Store.LinksForLaw(lawID)
+	links, linksErr := s.Store.LinksForLaw(lawID)
+	if linksErr != nil && s.Log != nil {
+		s.Log.Warn("links read failed", "law", lawID, "err", linksErr)
+	}
 	var issues []domain.GazetteIssue
 	var pointers []string
 	classes := map[string]domain.LinkClass{}
@@ -170,14 +180,12 @@ func (s *Service) freshnessFor(lawID string, opts IncludeOpts) (FreshnessMeta, e
 	}
 	tocT, _, _ := s.Store.GetMetaTime("last_toc_success")
 	giiT, _, _ := s.Store.GetMetaTime("last_gii_feed_success")
-	bgblT, bgblOK, _ := s.Store.GetMetaTime("last_bgbl_feed_success")
-	eliT, eliOK, _ := s.Store.GetMetaTime("last_eli_probe_success")
-	bgbl := bgblT
-	probeOnly := false
-	if (!bgblOK || time.Since(bgblT) > s.CFG.FreshnessMaxAge) && eliOK {
-		bgbl = eliT
-		probeOnly = true
-	}
+	bgblT, _, _ := s.Store.GetMetaTime("last_bgbl_feed_success")
+	bgblDegraded, _, _ := s.Store.GetMetaTime("last_bgbl_feed_degraded")
+	bgblT = freshness.EffectiveBGBlFeedTime(bgblT, bgblDegraded)
+	eliT, _, _ := s.Store.GetMetaTime("last_eli_probe_success")
+	now := time.Now().UTC()
+	bgbl, probeOnly := freshness.BGBLEvidence(bgblT, eliT, now, s.CFG.FreshnessMaxAge)
 	linkedRows, discErr := s.linkedInstrumentsFor(lawID)
 	if discErr != nil && s.Log != nil {
 		s.Log.Warn("discovered links read failed", "law", lawID, "err", discErr)
@@ -186,7 +194,6 @@ func (s *Service) freshnessFor(lawID string, opts IncludeOpts) (FreshnessMeta, e
 	operativeLinked := instruments.FilterOperativeLinked(s.Store, linkedRows)
 	hasLinked := len(operativeLinked) > 0 || discErr != nil
 	instrRefs, instrIssues := instruments.CollectEvidence(s.Store, operativeLinked, lawID, stand)
-	now := time.Now().UTC()
 	// Ensure all linked instrument children exist as law stubs (seeded, family, discovered).
 	ensured := map[string]struct{}{}
 	for _, li := range linkedRows {
@@ -219,6 +226,7 @@ func (s *Service) freshnessFor(lawID string, opts IncludeOpts) (FreshnessMeta, e
 		InstrumentRefs:             instrRefs,
 		InstrumentIssues:           instrIssues,
 		HasSeededLinkedInstruments: hasLinked,
+		LinksReadFailed:            linksErr != nil || discErr != nil,
 		LastTOCSuccess:             tocT,
 		LastGIIFeedSuccess:         giiT,
 		LastBGBlSuccess:            bgbl,
@@ -350,16 +358,55 @@ func (s *Service) ListStale(ctx context.Context) ([]domain.FreshnessRecord, erro
 	return s.Store.ListFreshnessByState(domain.FreshnessConfirmedStale)
 }
 
+// ErrLawNotFound is returned when a targeted recheck references an unknown law id.
+var ErrLawNotFound = errors.New("law not found")
+
+// ErrRecheckTimeout is returned when ForceRecheck exceeds its context deadline.
+var ErrRecheckTimeout = errors.New("recheck timed out")
+
 func (s *Service) ForceRecheck(ctx context.Context, lawID string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%w: %w", ErrRecheckTimeout, err)
+	}
+	lawID = strings.TrimSpace(lawID)
+	if lawID != "" {
+		if err := validateQueryLength(lawID); err != nil {
+			return err
+		}
+		if _, ok, err := s.Store.GetLaw(lawID); err != nil {
+			return err
+		} else if !ok {
+			var resolved bool
+			if snap := s.Search.Current(); snap != nil {
+				if best, _ := snap.Resolve(lawID, s.CFG.MatchThreshold); best != nil {
+					lawID = best.Law.ID
+					resolved = true
+				}
+			}
+			if !resolved {
+				return ErrLawNotFound
+			}
+		}
+	}
 	if err := s.Sync.RunGIIFeed(ctx); err != nil {
+		if err := recheckCtxExpired(ctx); err != nil {
+			return err
+		}
 		s.Log.Warn("force recheck gii feed", "err", err)
 	}
 	if err := s.Sync.RunBGBlFeeds(ctx); err != nil {
+		if err := recheckCtxExpired(ctx); err != nil {
+			return err
+		}
 		_ = s.Sync.RunELIProbe(ctx)
 	}
 	if lawID != "" {
 		if law, ok, _ := s.Store.GetLaw(lawID); ok {
-			_ = s.Sync.RefreshStandForLaw(ctx, law)
+			if err := s.Sync.RefreshStandForLaw(ctx, law); err != nil {
+				if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+					return fmt.Errorf("%w: %w", ErrRecheckTimeout, err)
+				}
+			}
 			s.Export.InvalidateLaw(law.ID)
 			// Ensure + refresh all linked children (TSV, family, discovered) for evidence.
 			rows, err := s.linkedInstrumentsFor(lawID)
@@ -390,7 +437,11 @@ func (s *Service) ForceRecheck(ctx context.Context, lawID string) error {
 					childID = normalize.Key(li.LawID)
 				}
 				if child, ok, _ := s.Store.GetLaw(childID); ok {
-					_ = s.Sync.RefreshStandForLaw(ctx, child)
+					if err := s.Sync.RefreshStandForLaw(ctx, child); err != nil {
+						if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+							return fmt.Errorf("%w: %w", ErrRecheckTimeout, err)
+						}
+					}
 					s.Export.InvalidateLaw(child.ID)
 				}
 			}
@@ -399,7 +450,20 @@ func (s *Service) ForceRecheck(ctx context.Context, lawID string) error {
 			}
 		}
 	}
-	return s.Sync.Reconcile(ctx)
+	if err := s.Sync.Reconcile(ctx); err != nil {
+		if err := recheckCtxExpired(ctx); err != nil {
+			return err
+		}
+		return err
+	}
+	return recheckCtxExpired(ctx)
+}
+
+func recheckCtxExpired(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%w: %w", ErrRecheckTimeout, err)
+	}
+	return nil
 }
 
 func (s *Service) SyncStatus(ctx context.Context) (domain.SyncStatus, error) {
@@ -407,6 +471,8 @@ func (s *Service) SyncStatus(ctx context.Context) (domain.SyncStatus, error) {
 	toc, tocOK, _ := s.Store.GetMetaTime("last_toc_success")
 	gii, _, _ := s.Store.GetMetaTime("last_gii_feed_success")
 	bgbl, _, _ := s.Store.GetMetaTime("last_bgbl_feed_success")
+	bgblDegraded, _, _ := s.Store.GetMetaTime("last_bgbl_feed_degraded")
+	bgbl = freshness.EffectiveBGBlFeedTime(bgbl, bgblDegraded)
 	eli, _, _ := s.Store.GetMetaTime("last_eli_probe_success")
 	rec, _, _ := s.Store.GetMetaTime("last_reconcile_at")
 	now := time.Now().UTC()
@@ -429,9 +495,11 @@ func (s *Service) SyncStatus(ctx context.Context) (domain.SyncStatus, error) {
 	if !rec.IsZero() {
 		st.LastReconcileAt = &rec
 	}
-	bgblOK := (!bgbl.IsZero() && now.Sub(bgbl) <= s.CFG.FreshnessMaxAge) ||
-		(!eli.IsZero() && now.Sub(eli) <= s.CFG.FreshnessMaxAge)
-	st.DataFresh = tocOK && now.Sub(toc) <= s.CFG.FreshnessMaxAge && bgblOK
+	bgblEvidence, _ := freshness.BGBLEvidence(bgbl, eli, now, s.CFG.FreshnessMaxAge)
+	tocFresh := freshness.TimestampFresh(toc, now, s.CFG.FreshnessMaxAge)
+	giiFresh := freshness.TimestampFresh(gii, now, s.CFG.FreshnessMaxAge)
+	bgblFresh := !bgblEvidence.IsZero()
+	st.DataFresh = st.CatalogReady && tocFresh && giiFresh && bgblFresh
 	return st, nil
 }
 
@@ -510,16 +578,20 @@ func (s *Service) CollectMetrics(reg *metrics.Registry) {
 }
 
 type ExportResult struct {
-	Matched             bool              `json:"matched"`
-	Law                 *domain.Law       `json:"law,omitempty"`
-	Freshness           *FreshnessMeta    `json:"freshness,omitempty"`
-	Formats             map[string]any    `json:"formats,omitempty"`
-	StructuralAmbiguity bool              `json:"structural_ambiguity"`
-	Suggestions         []Suggestion      `json:"suggestions,omitempty"`
-	UnitIDs             []string          `json:"unit_ids,omitempty"`
+	Matched             bool           `json:"matched"`
+	Law                 *domain.Law    `json:"law,omitempty"`
+	Freshness           *FreshnessMeta `json:"freshness,omitempty"`
+	Formats             map[string]any `json:"formats,omitempty"`
+	StructuralAmbiguity bool           `json:"structural_ambiguity"`
+	Suggestions         []Suggestion   `json:"suggestions,omitempty"`
+	UnitIDs             []string       `json:"unit_ids,omitempty"`
 }
 
 func (s *Service) ExportText(ctx context.Context, queryOrID string, formats []string, opts IncludeOpts) (ExportResult, error) {
+	queryOrID = strings.TrimSpace(queryOrID)
+	if err := validateQueryLength(queryOrID); err != nil {
+		return ExportResult{}, err
+	}
 	if !s.CFG.EnableExport {
 		return ExportResult{}, fmt.Errorf("export disabled")
 	}
@@ -703,7 +775,7 @@ func (s *Service) fetchLawXML(ctx context.Context, law domain.Law) ([]byte, erro
 			continue
 		}
 		data, err := io.ReadAll(io.LimitReader(rc, 16<<20))
-		rc.Close()
+		rc.Close() // #nosec G104 -- best-effort close after ReadAll in zip entry loop
 		if err != nil {
 			continue
 		}

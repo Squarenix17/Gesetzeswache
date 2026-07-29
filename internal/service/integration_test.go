@@ -92,6 +92,20 @@ func seedCatalog(t *testing.T, svc *Service, mt *httpmock.Transport) {
 	}
 }
 
+// seedSyncFreshMeta stamps all feed success timestamps for happy-path freshness (P1: includes GII).
+func seedSyncFreshMeta(t *testing.T, svc *Service, now time.Time) {
+	t.Helper()
+	if err := svc.Store.SetMetaTime("last_toc_success", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Store.SetMetaTime("last_gii_feed_success", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Store.SetMetaTime("last_bgbl_feed_success", now); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestIntegration_CatalogNotReady(t *testing.T) {
 	mt := httpmock.New()
 	svc := newTestService(t, mt)
@@ -125,9 +139,7 @@ func TestIntegration_DataFresh_trueAndFalse(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
-	if err := svc.Store.SetMetaTime("last_bgbl_feed_success", now); err != nil {
-		t.Fatal(err)
-	}
+	seedSyncFreshMeta(t, svc, now)
 	st, err = svc.SyncStatus(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -138,6 +150,9 @@ func TestIntegration_DataFresh_trueAndFalse(t *testing.T) {
 
 	old := now.Add(-7 * time.Hour)
 	if err := svc.Store.SetMetaTime("last_toc_success", old); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Store.SetMetaTime("last_gii_feed_success", old); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.Store.SetMetaTime("last_bgbl_feed_success", old); err != nil {
@@ -222,8 +237,7 @@ func TestIntegration_MiLoG_seedNotes_withoutExport_notConfirmedCurrent(t *testin
 	svc.Search.Swap(laws, variants)
 
 	now := time.Now().UTC()
-	_ = svc.Store.SetMetaTime("last_toc_success", now)
-	_ = svc.Store.SetMetaTime("last_bgbl_feed_success", now)
+	seedSyncFreshMeta(t, svc, now)
 
 	stand := citation.Parse("milog", "Zuletzt geändert durch Art. 8 Abs. 3 G v. 12.5.2026 I Nr. 137")
 	if !stand.ParseOK {
@@ -275,8 +289,7 @@ func TestIntegration_MiLoG_plusPlusVerordnung_notConfirmedCurrent(t *testing.T) 
 	svc.Search.Swap(laws, variants)
 
 	now := time.Now().UTC()
-	_ = svc.Store.SetMetaTime("last_toc_success", now)
-	_ = svc.Store.SetMetaTime("last_bgbl_feed_success", now)
+	seedSyncFreshMeta(t, svc, now)
 
 	// BGBl issue for the Verordnung — title has no "MiLoG", and no IssueLawLink.
 	if err := svc.Store.UpsertIssue(domain.GazetteIssue{
@@ -354,8 +367,7 @@ func TestIntegration_MiLoG_linkedChain_currentOnlyByDefault(t *testing.T) {
 	svc.Search.Swap(laws, variants)
 
 	now := time.Now().UTC()
-	_ = svc.Store.SetMetaTime("last_toc_success", now)
-	_ = svc.Store.SetMetaTime("last_bgbl_feed_success", now)
+	seedSyncFreshMeta(t, svc, now)
 	stand := citation.Parse("milog", "Zuletzt geändert durch Art. 8 Abs. 3 G v. 12.5.2026 I Nr. 137")
 	if err := svc.Store.UpsertStand(stand); err != nil {
 		t.Fatal(err)
@@ -433,7 +445,7 @@ func TestIntegration_SGB11_discovered_withoutTSV(t *testing.T) {
 	}
 	pbav := domain.Law{
 		ID: "pbav2025", Abbreviation: "PBAV 2025",
-		Title: "Pflegeberufe-Ausbildungs- und Prüfungsverordnung",
+		Title:   "Pflegeberufe-Ausbildungs- und Prüfungsverordnung",
 		GIIPath: "pbav_2025", GIIURL: "https://www.gesetze-im-internet.de/pbav_2025/",
 	}
 	if err := svc.Store.UpsertLaws([]domain.Law{law, pbav}); err != nil {
@@ -454,8 +466,7 @@ func TestIntegration_SGB11_discovered_withoutTSV(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
-	_ = svc.Store.SetMetaTime("last_toc_success", now)
-	_ = svc.Store.SetMetaTime("last_bgbl_feed_success", now)
+	seedSyncFreshMeta(t, svc, now)
 	stand := citation.Parse("sgb11", "Zuletzt geändert durch Art. 1 G v. 20.12.2024 BGBl. 2024 I Nr. 400")
 	if !stand.ParseOK {
 		t.Fatalf("stand parse failed: %+v", stand)
@@ -509,8 +520,7 @@ func TestIntegration_SGB11_pbav2025_linkedInstrument(t *testing.T) {
 	svc.Search.Swap(laws, variants)
 
 	now := time.Now().UTC()
-	_ = svc.Store.SetMetaTime("last_toc_success", now)
-	_ = svc.Store.SetMetaTime("last_bgbl_feed_success", now)
+	seedSyncFreshMeta(t, svc, now)
 	stand := citation.Parse("sgb11", "Zuletzt geändert durch Art. 1 G v. 20.12.2024 BGBl. 2024 I Nr. 400")
 	if !stand.ParseOK {
 		t.Fatalf("stand parse failed: %+v", stand)
@@ -558,8 +568,7 @@ func TestIntegration_ArbZG_confirmedCurrentWithoutSeededInstruments(t *testing.T
 	seedCatalog(t, svc, mt)
 
 	now := time.Now().UTC()
-	_ = svc.Store.SetMetaTime("last_toc_success", now)
-	_ = svc.Store.SetMetaTime("last_bgbl_feed_success", now)
+	seedSyncFreshMeta(t, svc, now)
 
 	stand := citation.Parse("arbzg", "Zuletzt geändert durch Art. 1 G v. 20.7.2022 BGBl. 2022 I Nr. 1170")
 	if !stand.ParseOK {
@@ -589,8 +598,7 @@ func TestIntegration_BGB_editorialGRefs_notForcedUncertain(t *testing.T) {
 	seedCatalog(t, svc, mt)
 
 	now := time.Now().UTC()
-	_ = svc.Store.SetMetaTime("last_toc_success", now)
-	_ = svc.Store.SetMetaTime("last_bgbl_feed_success", now)
+	seedSyncFreshMeta(t, svc, now)
 
 	stand := citation.Parse("bgb", "Zuletzt geändert durch Art. 1 G v. 16.8.2023 BGBl. 2023 I Nr. 198")
 	if !stand.ParseOK {
@@ -630,8 +638,7 @@ func TestIntegration_ArbZG_repairsStaleUnparsedStand(t *testing.T) {
 	seedCatalog(t, svc, mt)
 
 	now := time.Now().UTC()
-	_ = svc.Store.SetMetaTime("last_toc_success", now)
-	_ = svc.Store.SetMetaTime("last_bgbl_feed_success", now)
+	seedSyncFreshMeta(t, svc, now)
 
 	stale := domain.StandCitation{
 		LawID:      "arbzg",
@@ -679,8 +686,7 @@ func TestIntegration_MiLoV5_export_fundstelleStand_confirmedCurrent(t *testing.T
 	svc.Search.Swap(laws, variants)
 
 	now := time.Now().UTC()
-	_ = svc.Store.SetMetaTime("last_toc_success", now)
-	_ = svc.Store.SetMetaTime("last_bgbl_feed_success", now)
+	seedSyncFreshMeta(t, svc, now)
 
 	xmlBody := fixtures.MustRead("milov5_snippet.xml")
 	mt.SetBytes("www.gesetze-im-internet.de", "/milov5/xml.zip", fixtures.MustZipXML("milov5.xml", xmlBody))
@@ -750,6 +756,11 @@ func TestIntegration_BGBlFail_ELIFallback_setsProbeMeta(t *testing.T) {
 		t.Fatalf("expected ELI probe hit %s, hits=%v", wantHit, mt.Hits())
 	}
 
+	// P1: DataFresh also requires fresh GII feed (TOC already set by seedCatalog).
+	if err := svc.Store.SetMetaTime("last_gii_feed_success", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+
 	st, err := svc.SyncStatus(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -785,8 +796,7 @@ func TestIntegration_EStG_softGesetzFPDemoted(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
-	_ = svc.Store.SetMetaTime("last_toc_success", now)
-	_ = svc.Store.SetMetaTime("last_bgbl_feed_success", now)
+	seedSyncFreshMeta(t, svc, now)
 	stand := citation.Parse("estg", "Zuletzt geändert durch Art. 1 G v. 1.1.2024 I Nr. 100")
 	if err := svc.Store.UpsertStand(stand); err != nil {
 		t.Fatal(err)

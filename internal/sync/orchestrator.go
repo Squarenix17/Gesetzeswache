@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Squarenix17/gesetzeswache/internal/citation"
@@ -27,6 +28,7 @@ import (
 	"github.com/Squarenix17/gesetzeswache/internal/normalize"
 	"github.com/Squarenix17/gesetzeswache/internal/search"
 	"github.com/Squarenix17/gesetzeswache/internal/store"
+	"github.com/Squarenix17/gesetzeswache/internal/xmlsafe"
 )
 
 // Orchestrator runs independent sync jobs.
@@ -39,6 +41,8 @@ type Orchestrator struct {
 	Metrics     *metrics.Registry
 	Instruments *instruments.Catalog
 	Families    *instruments.FamilyCatalog
+
+	wg sync.WaitGroup
 }
 
 type tocItem struct {
@@ -70,6 +74,10 @@ func (o *Orchestrator) RunTOC(ctx context.Context) error {
 	if status >= 400 {
 		a.Error = fmt.Sprintf("status %d", status)
 		return fmt.Errorf("toc status %d", status)
+	}
+	if err := xmlsafe.RejectUnsafeXML(body); err != nil {
+		a.Error = err.Error()
+		return err
 	}
 	var root tocRoot
 	if err := xml.Unmarshal(body, &root); err != nil {
@@ -118,7 +126,10 @@ func (o *Orchestrator) RunTOC(ctx context.Context) error {
 	}
 	variants, _ := o.Store.ListVariants()
 	o.Search.Swap(laws, variants)
-	_ = o.Store.SetMetaTime("last_toc_success", time.Now().UTC())
+	if err := o.stampSuccessMeta("last_toc_success", time.Now().UTC()); err != nil {
+		a.Error = err.Error()
+		return err
+	}
 	a.Success = true
 	a.Detail = fmt.Sprintf("%d laws", len(laws))
 	o.Log.Info("toc sync ok", "laws", len(laws))
@@ -176,12 +187,17 @@ func (o *Orchestrator) RunGIIFeed(ctx context.Context) error {
 		a.Error = fmt.Sprintf("status %d", status)
 		return fmt.Errorf("gii feed status %d", status)
 	}
+	if err := xmlsafe.RejectUnsafeXML(body); err != nil {
+		a.Error = err.Error()
+		return err
+	}
 	var feed rssFeed
 	if err := xml.Unmarshal(body, &feed); err != nil {
 		a.Error = err.Error()
 		return err
 	}
 	n := 0
+	var storeErr error
 	for _, it := range feed.Channel.Items {
 		teil, year, num := parseBGBlRef(it.Title + " " + it.Description)
 		if year == 0 || num == "" {
@@ -210,25 +226,33 @@ func (o *Orchestrator) RunGIIFeed(ctx context.Context) error {
 			iss.FirstSeenAt = existing.FirstSeenAt
 			iss.DiscoverySources = mergeSources(existing.DiscoverySources, "gii_feed")
 		}
-		_ = o.Store.UpsertIssue(iss)
+		storeErr = firstStoreErr(storeErr, o.Store.UpsertIssue(iss))
 
 		lawID := matchLawFromItem(it, o.Search.Current())
 		if lawID != "" {
-			_ = o.Store.UpsertLink(domain.IssueLawLink{
+			storeErr = firstStoreErr(storeErr, o.Store.UpsertLink(domain.IssueLawLink{
 				IssueID:   id,
 				LawID:     lawID,
 				Class:     domain.LinkConfirmed,
 				CreatedAt: time.Now().UTC(),
-			})
+			}))
 			iss.Matched = true
-			_ = o.Store.UpsertIssue(iss)
+			storeErr = firstStoreErr(storeErr, o.Store.UpsertIssue(iss))
 			if law, ok, _ := o.Store.GetLaw(lawID); ok && discovery.LooksLikeVerordnung(law) {
-				_ = o.Store.SetMeta("discovery_queue:"+law.ID, "1")
+				storeErr = firstStoreErr(storeErr, o.Store.SetMeta("discovery_queue:"+law.ID, "1"))
 			}
 			n++
 		}
 	}
-	_ = o.Store.SetMetaTime("last_gii_feed_success", time.Now().UTC())
+	if storeErr != nil {
+		a.Error = storeErr.Error()
+		o.recordStoreWriteFailure("gii_feed")
+		return storeErr
+	}
+	if err := o.stampSuccessMeta("last_gii_feed_success", time.Now().UTC()); err != nil {
+		a.Error = err.Error()
+		return err
+	}
 	a.Success = true
 	a.Detail = fmt.Sprintf("linked %d", n)
 	return nil
@@ -244,19 +268,29 @@ func (o *Orchestrator) RunBGBlFeeds(ctx context.Context) error {
 		o.recordSyncJob(a)
 	}()
 	count := 0
-	for _, url := range []string{o.CFG.BGBlFeed1URL, o.CFG.BGBlFeed2URL} {
+	var storeErr error
+	var feedErr error
+	for feedIdx, url := range []string{o.CFG.BGBlFeed1URL, o.CFG.BGBlFeed2URL} {
 		body, _, status, err := o.HTTP.Get(ctx, url, "", "")
 		if err != nil {
 			o.Log.Warn("bgbl feed fetch failed", "url", url, "err", err)
+			feedErr = firstStoreErr(feedErr, fmt.Errorf("feed %d fetch: %w", feedIdx+1, err))
 			continue
 		}
 		if status >= 400 {
 			o.Log.Warn("bgbl feed status", "url", url, "status", status)
+			feedErr = firstStoreErr(feedErr, fmt.Errorf("feed %d status %d", feedIdx+1, status))
+			continue
+		}
+		if err := xmlsafe.RejectUnsafeXML(body); err != nil {
+			o.Log.Warn("bgbl feed unsafe xml", "err", err)
+			feedErr = firstStoreErr(feedErr, fmt.Errorf("feed %d unsafe xml: %w", feedIdx+1, err))
 			continue
 		}
 		var feed rssFeed
 		if err := xml.Unmarshal(body, &feed); err != nil {
 			o.Log.Warn("bgbl feed parse", "err", err)
+			feedErr = firstStoreErr(feedErr, fmt.Errorf("feed %d parse: %w", feedIdx+1, err))
 			continue
 		}
 		for _, it := range feed.Channel.Items {
@@ -291,15 +325,29 @@ func (o *Orchestrator) RunBGBlFeeds(ctx context.Context) error {
 				iss.Matched = existing.Matched
 				iss.DiscoverySources = mergeSources(existing.DiscoverySources, "bgbl_feed")
 			}
-			_ = o.Store.UpsertIssue(iss)
+			storeErr = firstStoreErr(storeErr, o.Store.UpsertIssue(iss))
 			count++
 		}
+	}
+	if feedErr != nil {
+		a.Error = feedErr.Error()
+		o.markBGBlFeedDegraded(time.Now().UTC())
+		return feedErr
 	}
 	if count == 0 {
 		a.Error = "no items parsed from bgbl feeds"
 		return fmt.Errorf("%s", a.Error)
 	}
-	_ = o.Store.SetMetaTime("last_bgbl_feed_success", time.Now().UTC())
+	if storeErr != nil {
+		a.Error = storeErr.Error()
+		o.recordStoreWriteFailure("bgbl_feed")
+		return storeErr
+	}
+	o.clearBGBlFeedDegraded()
+	if err := o.stampSuccessMeta("last_bgbl_feed_success", time.Now().UTC()); err != nil {
+		a.Error = err.Error()
+		return err
+	}
 	a.Success = true
 	a.Detail = fmt.Sprintf("%d issues touched", count)
 	return nil
@@ -316,6 +364,8 @@ func (o *Orchestrator) RunELIProbe(ctx context.Context) error {
 	}()
 	year := time.Now().UTC().Year()
 	found := 0
+	anyHTTPSuccess := false
+	var storeErr error
 	for _, teil := range []int{1, 2} {
 		maxN := latestNumber(o.Store, teil, year)
 		for n := maxN; n <= maxN+3; n++ {
@@ -325,6 +375,7 @@ func (o *Orchestrator) RunELIProbe(ctx context.Context) error {
 			if err != nil {
 				continue
 			}
+			anyHTTPSuccess = true
 			if !ok {
 				continue
 			}
@@ -348,11 +399,23 @@ func (o *Orchestrator) RunELIProbe(ctx context.Context) error {
 					iss.ExistenceConfidence = "high"
 				}
 			}
-			_ = o.Store.UpsertIssue(iss)
+			storeErr = firstStoreErr(storeErr, o.Store.UpsertIssue(iss))
 			found++
 		}
 	}
-	_ = o.Store.SetMetaTime("last_eli_probe_success", time.Now().UTC())
+	if !anyHTTPSuccess {
+		a.Error = "all eli probe HTTP requests failed"
+		return fmt.Errorf("%s", a.Error)
+	}
+	if storeErr != nil {
+		a.Error = storeErr.Error()
+		o.recordStoreWriteFailure("eli_probe")
+		return storeErr
+	}
+	if err := o.stampSuccessMeta("last_eli_probe_success", time.Now().UTC()); err != nil {
+		a.Error = err.Error()
+		return err
+	}
 	a.Success = true
 	a.Detail = fmt.Sprintf("probed hits %d", found)
 	return nil
@@ -377,11 +440,7 @@ func latestNumber(st *store.Store, teil, year int) int {
 	max := 1
 	for _, iss := range issues {
 		if iss.Teil == teil && iss.Year == year {
-			n, _ := strconv.Atoi(strings.TrimRightFunc(iss.Number, func(r rune) bool {
-				return r < '0' || r > '9'
-			}))
-			// parse leading digits
-			n = 0
+			n := 0
 			for _, r := range iss.Number {
 				if r < '0' || r > '9' {
 					break
@@ -398,23 +457,14 @@ func latestNumber(st *store.Store, teil, year int) int {
 
 // Reconcile updates freshness for all laws and optionally heuristic-links unmatched issues.
 func (o *Orchestrator) Reconcile(ctx context.Context) error {
-	_ = ctx
 	now := time.Now().UTC()
 	tocT, _, _ := o.Store.GetMetaTime("last_toc_success")
 	giiT, _, _ := o.Store.GetMetaTime("last_gii_feed_success")
-	bgblT, bgblOK, _ := o.Store.GetMetaTime("last_bgbl_feed_success")
-	eliT, eliOK, _ := o.Store.GetMetaTime("last_eli_probe_success")
-	bgblSuccess := bgblT
-	probeOnly := false
-	if !bgblOK || (eliOK && (bgblT.IsZero() || eliT.After(bgblT.Add(o.CFG.FreshnessMaxAge)))) {
-		if eliOK {
-			if bgblT.IsZero() || now.Sub(bgblT) > o.CFG.FreshnessMaxAge {
-				bgblSuccess = eliT
-				probeOnly = true
-			}
-		}
-	}
-	_ = giiT
+	bgblT, _, _ := o.Store.GetMetaTime("last_bgbl_feed_success")
+	bgblDegraded, _, _ := o.Store.GetMetaTime(metaKeyBGBlFeedDegraded)
+	bgblT = freshness.EffectiveBGBlFeedTime(bgblT, bgblDegraded)
+	eliT, _, _ := o.Store.GetMetaTime("last_eli_probe_success")
+	bgblSuccess, probeOnly := freshness.BGBLEvidence(bgblT, eliT, now, o.CFG.FreshnessMaxAge)
 
 	if o.CFG.EnableHeuristic {
 		o.heuristicLink(now)
@@ -425,6 +475,9 @@ func (o *Orchestrator) Reconcile(ctx context.Context) error {
 		return err
 	}
 	for _, law := range laws {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		stand, _, _ := o.Store.GetStand(law.ID)
 		if !stand.ParseOK && strings.TrimSpace(stand.Raw) != "" {
 			if parsed := citation.Parse(law.ID, stand.Raw); parsed.ParseOK {
@@ -432,7 +485,10 @@ func (o *Orchestrator) Reconcile(ctx context.Context) error {
 				stand = parsed
 			}
 		}
-		links, _ := o.Store.LinksForLaw(law.ID)
+		links, linksErr := o.Store.LinksForLaw(law.ID)
+		if linksErr != nil && o.Log != nil {
+			o.Log.Warn("links read failed", "law", law.ID, "err", linksErr)
+		}
 		var issues []domain.GazetteIssue
 		classes := map[string]domain.LinkClass{}
 		for _, l := range links {
@@ -481,6 +537,7 @@ func (o *Orchestrator) Reconcile(ctx context.Context) error {
 			InstrumentRefs:             instrRefs,
 			InstrumentIssues:           instrIssues,
 			HasSeededLinkedInstruments: hasLinked,
+			LinksReadFailed:            linksErr != nil || discErr != nil,
 			LastTOCSuccess:             tocT,
 			LastGIIFeedSuccess:         giiT,
 			LastBGBlSuccess:            bgblSuccess,
@@ -526,6 +583,14 @@ func (o *Orchestrator) heuristicLink(now time.Time) {
 // RefreshStandForLaw fetches Stand from the law HTML index page; if absent, falls back to
 // standangabe in the GII export XML. URLs are always rebuilt from config base + validated slug.
 func (o *Orchestrator) RefreshStandForLaw(ctx context.Context, law domain.Law) error {
+	lookup, err := o.catalogLookup()
+	if err != nil {
+		return err
+	}
+	return o.refreshStandForLaw(ctx, law, lookup)
+}
+
+func (o *Orchestrator) refreshStandForLaw(ctx context.Context, law domain.Law, lookup discovery.CatalogLookup) error {
 	if law.GIIPath == "" {
 		return nil
 	}
@@ -534,19 +599,30 @@ func (o *Orchestrator) RefreshStandForLaw(ctx context.Context, law domain.Law) e
 		return err
 	}
 	body, _, status, err := o.HTTP.Get(ctx, url, "", "")
+	htmlFailed := err != nil || status >= 400
 	if err != nil {
-		return err
+		// fall through to XML attempt
+	} else if status >= 400 {
+		err = fmt.Errorf("stand fetch status %d", status)
 	}
-	if status >= 400 {
-		return fmt.Errorf("stand fetch status %d", status)
+	var raw string
+	if !htmlFailed {
+		raw = extractStand(string(body))
 	}
-	raw := extractStand(string(body))
 	var xmlData []byte
 	if raw == "" {
 		var xerr error
 		xmlData, xerr = o.fetchLawXML(ctx, law)
 		if xerr != nil {
-			o.Log.Debug("stand xml fallback failed", "law", law.ID, "err", xerr)
+			if htmlFailed {
+				if o.Log != nil {
+					o.Log.Debug("stand refresh failed", "law", law.ID, "html_err", err, "xml_err", xerr)
+				}
+				return fmt.Errorf("stand refresh: html and xml both failed: html=%v xml=%v", err, xerr)
+			}
+			if o.Log != nil {
+				o.Log.Debug("stand xml fallback failed", "law", law.ID, "err", xerr)
+			}
 			return nil
 		}
 		raw = export.ExtractStandRaw(xmlData)
@@ -577,10 +653,6 @@ func (o *Orchestrator) RefreshStandForLaw(ctx context.Context, law domain.Law) e
 			}
 		}
 		if o.CFG.DiscoveryEnabled {
-			lookup, lerr := o.catalogLookup()
-			if lerr != nil {
-				return lerr
-			}
 			if _, err := discovery.IngestLawXML(o.Store, lookup, law, xmlData); err != nil {
 				if o.Log != nil {
 					o.Log.Warn("discovery ingest", "law", law.ID, "err", err)
@@ -611,6 +683,7 @@ func (o *Orchestrator) RefreshMissingStands(ctx context.Context, max int) (int, 
 		}
 		if err := o.RefreshStandForLaw(ctx, law); err != nil {
 			o.Log.Warn("stand refresh", "law", law.ID, "err", err)
+			o.recordStandRefreshFailure()
 			continue
 		}
 		if _, ok, _ := o.Store.GetStand(law.ID); ok {
@@ -630,6 +703,10 @@ func (o *Orchestrator) DiscoverOrdinances(ctx context.Context, max int) (int, er
 		return 0, err
 	}
 	candidates := o.discoveryCandidates(laws)
+	lookup, err := o.catalogLookup()
+	if err != nil {
+		return 0, err
+	}
 	n := 0
 	for _, law := range candidates {
 		if err := ctx.Err(); err != nil {
@@ -641,8 +718,22 @@ func (o *Orchestrator) DiscoverOrdinances(ctx context.Context, max int) (int, er
 		if ingested, _, _ := o.Store.GetMeta("discovery_ingested:" + law.ID); ingested == "1" {
 			continue
 		}
-		if err := o.RefreshStandForLaw(ctx, law); err != nil {
+		if err := o.refreshStandForLaw(ctx, law, lookup); err != nil {
 			o.Log.Warn("discovery refresh", "law", law.ID, "err", err)
+			o.recordStandRefreshFailure()
+			continue
+		}
+		ingestOK := false
+		if o.CFG.DiscoveryEnabled {
+			ok, ierr := o.discoveryIngestLaw(ctx, law, lookup)
+			if ierr != nil {
+				o.recordDiscoveryIngest("error")
+				continue
+			}
+			o.recordDiscoveryIngest("success")
+			ingestOK = ok
+		}
+		if !ingestOK {
 			continue
 		}
 		_ = o.Store.SetMeta("discovery_ingested:"+law.ID, "1")
@@ -707,7 +798,7 @@ func (o *Orchestrator) fetchLawXML(ctx context.Context, law domain.Law) ([]byte,
 			continue
 		}
 		data, err := io.ReadAll(io.LimitReader(rc, 16<<20))
-		rc.Close()
+		rc.Close() // #nosec G104 -- best-effort close after ReadAll in zip entry loop
 		if err != nil {
 			continue
 		}
@@ -809,30 +900,43 @@ func matchLawFromItem(it rssItem, snap *search.Snapshot) string {
 
 // StartBackground launches independent timers.
 func (o *Orchestrator) StartBackground(ctx context.Context) {
-	go o.loop(ctx, o.CFG.TOCInterval, o.RunTOC)
-	go o.loop(ctx, o.CFG.GIIFeedInterval, o.RunGIIFeed)
-	go o.loop(ctx, o.CFG.BGBlFeedInterval, o.RunBGBlFeeds)
-	go o.loop(ctx, o.CFG.ELIProbeInterval, o.RunELIProbe)
-	go o.loop(ctx, 5*time.Minute, func(c context.Context) error { return o.Reconcile(c) })
+	o.loop(ctx, o.CFG.TOCInterval, o.RunTOC)
+	o.loop(ctx, o.CFG.GIIFeedInterval, o.RunGIIFeed)
+	o.loop(ctx, o.CFG.BGBlFeedInterval, o.RunBGBlFeeds)
+	o.loop(ctx, o.CFG.ELIProbeInterval, o.RunELIProbe)
+	o.loop(ctx, 5*time.Minute, func(c context.Context) error { return o.Reconcile(c) })
+}
+
+// Wait blocks until all background sync loops started via StartBackground exit.
+func (o *Orchestrator) Wait() {
+	o.wg.Wait()
+}
+
+func (o *Orchestrator) sourceTimeout(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(parent, 2*o.CFG.HTTPTimeout)
 }
 
 func (o *Orchestrator) loop(ctx context.Context, every time.Duration, fn func(context.Context) error) {
-	// Delay first tick — InitialSync already ran at startup.
-	t := time.NewTimer(every)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			cctx, cancel := context.WithTimeout(ctx, o.CFG.HTTPTimeout*4)
-			if err := fn(cctx); err != nil {
-				o.Log.Error("sync job failed", "err", err)
+	o.wg.Add(1)
+	go func() {
+		defer o.wg.Done()
+		// Delay first tick — InitialSync already ran at startup.
+		t := time.NewTimer(every)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				cctx, cancel := o.sourceTimeout(ctx)
+				if err := fn(cctx); err != nil {
+					o.Log.Error("sync job failed", "err", err)
+				}
+				cancel()
+				t.Reset(every)
 			}
-			cancel()
-			t.Reset(every)
 		}
-	}
+	}()
 }
 
 // InitialSync runs catalog + feeds once at startup (best effort).

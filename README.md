@@ -105,6 +105,8 @@ BGBl issue identity is always the triple `(teil, year, number)`, never compare i
 | `confirmed_stale` | Known newer publication | Quarantine / manual review |
 | `uncertain` | Insufficient or conflicting signals | Quarantine / manual review |
 
+**Note on `uncertain`:** Finding the right law is not the same as proving it is fully current. Parents that point at linked ordinances (e.g. MiLoG → Mindestlohn-Verordnung) stay `uncertain` until those ordinance citations are verified. That is intentional fail-closed behaviour, not a failed lookup. Sync can still be healthy (`data_fresh: true`) while a law is `uncertain`.
+
 Optional: set `GEW_REFUSE_EXPORT_STALE=true` so the server rejects export for `confirmed_stale` laws.
 
 Amendment-by-reference parents (e.g. MiLoG, SGB XI § 55) expose `freshness.linked_instruments`: **section-scoped** ordinances with Inkrafttreten (`effective_from`), `section_hint`, and `status` (`current`/`future` by default; superseded `past` only with `include=past`). They are not full-law replacements — export the child slug (e.g. `milov5`, `pbav_2025`) for operative § text.

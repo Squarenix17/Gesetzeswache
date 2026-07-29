@@ -11,19 +11,20 @@ import (
 
 // Input gathers evidence for one law evaluation.
 type Input struct {
-	LawID              string
-	Stand              domain.StandCitation
-	LinkedIssues       []domain.GazetteIssue // issues linked to this law (confirmed or heuristic)
-	LinkClasses        map[string]domain.LinkClass // issueID → class; optional
-	InstrumentRefs             []domain.InstrumentRef // from Stand / +++ notes
-	InstrumentIssues           []domain.GazetteIssue  // store issues matching InstrumentRefs
-	HasSeededLinkedInstruments bool                   // seeded TSV and/or high-confidence discovered linked instruments
-	LastTOCSuccess     time.Time
-	LastGIIFeedSuccess time.Time
-	LastBGBlSuccess    time.Time // feed or probe
-	BGBlFromProbeOnly  bool
-	Now                time.Time
-	MaxAge             time.Duration
+	LawID                      string
+	Stand                      domain.StandCitation
+	LinkedIssues               []domain.GazetteIssue       // issues linked to this law (confirmed or heuristic)
+	LinkClasses                map[string]domain.LinkClass // issueID → class; optional
+	InstrumentRefs             []domain.InstrumentRef      // from Stand / +++ notes
+	InstrumentIssues           []domain.GazetteIssue       // store issues matching InstrumentRefs
+	HasSeededLinkedInstruments bool                        // seeded TSV and/or high-confidence discovered linked instruments
+	LinksReadFailed            bool                        // LinksForLaw or DiscoveredForParent store read failed → fail closed
+	LastTOCSuccess             time.Time
+	LastGIIFeedSuccess         time.Time
+	LastBGBlSuccess            time.Time // feed or probe
+	BGBlFromProbeOnly          bool
+	Now                        time.Time
+	MaxAge                     time.Duration
 }
 
 // Evaluate derives freshness state. Never returns confirmed_current when sync data is too old,
@@ -49,6 +50,20 @@ func Evaluate(in Input) domain.FreshnessRecord {
 		rec.State = domain.FreshnessUncertain
 		rec.Confidence = "low"
 		rec.Rationale = "sync data older than max age"
+		return rec
+	}
+
+	if in.BGBlFromProbeOnly {
+		rec.State = domain.FreshnessUncertain
+		rec.Confidence = "low"
+		rec.Rationale = "bgbl_evidence_probe_only"
+		return rec
+	}
+
+	if in.LinksReadFailed {
+		rec.State = domain.FreshnessUncertain
+		rec.Confidence = "low"
+		rec.Rationale = "links_read_failed"
 		return rec
 	}
 
@@ -113,11 +128,13 @@ func syncWithinMaxAge(in Input, now time.Time) bool {
 	if in.MaxAge <= 0 {
 		in.MaxAge = 6 * time.Hour
 	}
-	if in.LastTOCSuccess.IsZero() || now.Sub(in.LastTOCSuccess) > in.MaxAge {
+	if !timestampFresh(in.LastTOCSuccess, now, in.MaxAge) {
 		return false
 	}
-	bgbl := in.LastBGBlSuccess
-	if bgbl.IsZero() || now.Sub(bgbl) > in.MaxAge {
+	if !timestampFresh(in.LastGIIFeedSuccess, now, in.MaxAge) {
+		return false
+	}
+	if !timestampFresh(in.LastBGBlSuccess, now, in.MaxAge) {
 		return false
 	}
 	return true

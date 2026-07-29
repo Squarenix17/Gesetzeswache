@@ -10,12 +10,13 @@ import (
 func TestConfirmedCurrent(t *testing.T) {
 	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
 	rec := Evaluate(Input{
-		LawID: "bgb",
-		Stand: domain.StandCitation{LawID: "bgb", Year: 2024, Teil: 1, Number: "100", ParseOK: true},
-		LastTOCSuccess:  now.Add(-time.Hour),
-		LastBGBlSuccess: now.Add(-time.Hour),
-		Now:             now,
-		MaxAge:          6 * time.Hour,
+		LawID:              "bgb",
+		Stand:              domain.StandCitation{LawID: "bgb", Year: 2024, Teil: 1, Number: "100", ParseOK: true},
+		LastTOCSuccess:     now.Add(-time.Hour),
+		LastGIIFeedSuccess: now.Add(-time.Hour),
+		LastBGBlSuccess:    now.Add(-time.Hour),
+		Now:                now,
+		MaxAge:             6 * time.Hour,
 	})
 	if rec.State != domain.FreshnessConfirmedCurrent {
 		t.Fatalf("got %s (%s)", rec.State, rec.Rationale)
@@ -25,8 +26,8 @@ func TestConfirmedCurrent(t *testing.T) {
 func TestForcedUncertainOnOldSync(t *testing.T) {
 	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
 	rec := Evaluate(Input{
-		LawID: "bgb",
-		Stand: domain.StandCitation{ParseOK: true, Year: 2024, Teil: 1, Number: "1"},
+		LawID:           "bgb",
+		Stand:           domain.StandCitation{ParseOK: true, Year: 2024, Teil: 1, Number: "1"},
 		LastTOCSuccess:  now.Add(-48 * time.Hour),
 		LastBGBlSuccess: now.Add(-time.Hour),
 		Now:             now,
@@ -45,10 +46,11 @@ func TestStaleWhenNewerIssue(t *testing.T) {
 		LinkedIssues: []domain.GazetteIssue{{
 			ID: "BGBl-1/2025/5", Teil: 1, Year: 2025, Number: "5",
 		}},
-		LastTOCSuccess:  now.Add(-time.Hour),
-		LastBGBlSuccess: now.Add(-time.Hour),
-		Now:             now,
-		MaxAge:          6 * time.Hour,
+		LastTOCSuccess:     now.Add(-time.Hour),
+		LastGIIFeedSuccess: now.Add(-time.Hour),
+		LastBGBlSuccess:    now.Add(-time.Hour),
+		Now:                now,
+		MaxAge:             6 * time.Hour,
 	})
 	if rec.State != domain.FreshnessConfirmedStale {
 		t.Fatalf("got %s", rec.State)
@@ -58,12 +60,13 @@ func TestStaleWhenNewerIssue(t *testing.T) {
 func TestUncertainWhenStandMissing(t *testing.T) {
 	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
 	rec := Evaluate(Input{
-		LawID:           "milog",
-		Stand:           domain.StandCitation{LawID: "milog", Raw: "", ParseOK: false},
-		LastTOCSuccess:  now.Add(-time.Hour),
-		LastBGBlSuccess: now.Add(-time.Hour),
-		Now:             now,
-		MaxAge:          6 * time.Hour,
+		LawID:              "milog",
+		Stand:              domain.StandCitation{LawID: "milog", Raw: "", ParseOK: false},
+		LastTOCSuccess:     now.Add(-time.Hour),
+		LastGIIFeedSuccess: now.Add(-time.Hour),
+		LastBGBlSuccess:    now.Add(-time.Hour),
+		Now:                now,
+		MaxAge:             6 * time.Hour,
 	})
 	if rec.State != domain.FreshnessUncertain {
 		t.Fatalf("got %s want uncertain (%s)", rec.State, rec.Rationale)
@@ -81,10 +84,11 @@ func TestUncertainWhenStandUnparsedNoLinks(t *testing.T) {
 			LawID: "milog", Raw: "opaque stand text", Year: 2026, ParseOK: false,
 			ParseNotes: "insufficient structured fields",
 		},
-		LastTOCSuccess:  now.Add(-time.Hour),
-		LastBGBlSuccess: now.Add(-time.Hour),
-		Now:             now,
-		MaxAge:          6 * time.Hour,
+		LastTOCSuccess:     now.Add(-time.Hour),
+		LastGIIFeedSuccess: now.Add(-time.Hour),
+		LastBGBlSuccess:    now.Add(-time.Hour),
+		Now:                now,
+		MaxAge:             6 * time.Hour,
 	})
 	if rec.State != domain.FreshnessUncertain {
 		t.Fatalf("got %s want uncertain", rec.State)
@@ -99,10 +103,11 @@ func TestStaleWhenUnparsedStandWithLinkedIssue(t *testing.T) {
 		LinkedIssues: []domain.GazetteIssue{{
 			ID: "BGBl-1/2025/268", Teil: 1, Year: 2025, Number: "268",
 		}},
-		LastTOCSuccess:  now.Add(-time.Hour),
-		LastBGBlSuccess: now.Add(-time.Hour),
-		Now:             now,
-		MaxAge:          6 * time.Hour,
+		LastTOCSuccess:     now.Add(-time.Hour),
+		LastGIIFeedSuccess: now.Add(-time.Hour),
+		LastBGBlSuccess:    now.Add(-time.Hour),
+		Now:                now,
+		MaxAge:             6 * time.Hour,
 	})
 	if rec.State != domain.FreshnessConfirmedStale {
 		t.Fatalf("got %s want confirmed_stale", rec.State)
@@ -124,6 +129,7 @@ func TestConfirmedCurrentDespiteEditorialGRefs(t *testing.T) {
 		},
 		HasSeededLinkedInstruments: false,
 		LastTOCSuccess:             now.Add(-time.Hour),
+		LastGIIFeedSuccess:         now.Add(-time.Hour),
 		LastBGBlSuccess:            now.Add(-time.Hour),
 		Now:                        now,
 		MaxAge:                     6 * time.Hour,
@@ -151,6 +157,7 @@ func TestConfirmedCurrentDespiteEditorialBekRefs(t *testing.T) {
 		},
 		HasSeededLinkedInstruments: false,
 		LastTOCSuccess:             now.Add(-time.Hour),
+		LastGIIFeedSuccess:         now.Add(-time.Hour),
 		LastBGBlSuccess:            now.Add(-time.Hour),
 		Now:                        now,
 		MaxAge:                     6 * time.Hour,
@@ -174,6 +181,7 @@ func TestUncertainWhenSeededAndEmptyKindRefs(t *testing.T) {
 		}},
 		HasSeededLinkedInstruments: true,
 		LastTOCSuccess:             now.Add(-time.Hour),
+		LastGIIFeedSuccess:         now.Add(-time.Hour),
 		LastBGBlSuccess:            now.Add(-time.Hour),
 		Now:                        now,
 		MaxAge:                     6 * time.Hour,
@@ -205,10 +213,11 @@ func TestUncertainWhenPlusPlusCitesVerordnung(t *testing.T) {
 			ID: "BGBl-1/2025/268", Teil: 1, Year: 2025, Number: "268",
 			Title: "Fünfte Mindestlohnanpassungsverordnung", // no MiLoG in title
 		}},
-		LastTOCSuccess:  now.Add(-time.Hour),
-		LastBGBlSuccess: now.Add(-time.Hour),
-		Now:             now,
-		MaxAge:          6 * time.Hour,
+		LastTOCSuccess:     now.Add(-time.Hour),
+		LastGIIFeedSuccess: now.Add(-time.Hour),
+		LastBGBlSuccess:    now.Add(-time.Hour),
+		Now:                now,
+		MaxAge:             6 * time.Hour,
 	})
 	if rec.State == domain.FreshnessConfirmedCurrent {
 		t.Fatalf("must not be confirmed_current when +++ cites Verordnung; got %s (%s)", rec.State, rec.Rationale)
@@ -231,6 +240,7 @@ func TestConfirmedCurrentWhenBareBekOnNonSeeded(t *testing.T) {
 		}},
 		HasSeededLinkedInstruments: false,
 		LastTOCSuccess:             now.Add(-time.Hour),
+		LastGIIFeedSuccess:         now.Add(-time.Hour),
 		LastBGBlSuccess:            now.Add(-time.Hour),
 		Now:                        now,
 		MaxAge:                     6 * time.Hour,
@@ -253,6 +263,7 @@ func TestUncertainWhenSectionScopedBek(t *testing.T) {
 		}},
 		HasSeededLinkedInstruments: false,
 		LastTOCSuccess:             now.Add(-time.Hour),
+		LastGIIFeedSuccess:         now.Add(-time.Hour),
 		LastBGBlSuccess:            now.Add(-time.Hour),
 		Now:                        now,
 		MaxAge:                     6 * time.Hour,
@@ -269,14 +280,15 @@ func TestHeuristicLinksLowerConfidence(t *testing.T) {
 	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
 	iss := domain.GazetteIssue{ID: "BGBl-1/2025/5", Teil: 1, Year: 2025, Number: "5"}
 	rec := Evaluate(Input{
-		LawID:        "bgb",
-		Stand:        domain.StandCitation{Year: 2024, Teil: 1, Number: "10", ParseOK: true},
-		LinkedIssues: []domain.GazetteIssue{iss},
-		LinkClasses:  map[string]domain.LinkClass{iss.ID: domain.LinkHeuristic},
-		LastTOCSuccess:  now.Add(-time.Hour),
-		LastBGBlSuccess: now.Add(-time.Hour),
-		Now:             now,
-		MaxAge:          6 * time.Hour,
+		LawID:              "bgb",
+		Stand:              domain.StandCitation{Year: 2024, Teil: 1, Number: "10", ParseOK: true},
+		LinkedIssues:       []domain.GazetteIssue{iss},
+		LinkClasses:        map[string]domain.LinkClass{iss.ID: domain.LinkHeuristic},
+		LastTOCSuccess:     now.Add(-time.Hour),
+		LastGIIFeedSuccess: now.Add(-time.Hour),
+		LastBGBlSuccess:    now.Add(-time.Hour),
+		Now:                now,
+		MaxAge:             6 * time.Hour,
 	})
 	if rec.State != domain.FreshnessConfirmedStale {
 		t.Fatalf("got %s", rec.State)

@@ -11,16 +11,18 @@ import (
 )
 
 const (
-	MetricCatalogReady       = "gew_catalog_ready"
-	MetricDataFresh          = "gew_data_fresh"
-	MetricSyncLastSuccess    = "gew_sync_last_success_timestamp_seconds"
-	MetricSyncJobsTotal      = "gew_sync_jobs_total"
-	MetricFreshnessLaws      = "gew_freshness_laws"
-	MetricExportCacheLookups = "gew_export_cache_lookups_total"
-	MetricOutboundHTTP       = "gew_outbound_http_requests_total"
-	MetricDiscoveredLinks    = "gew_discovered_links"
-	MetricDiscoveryIngestTotal = "gew_discovery_ingest_total" // labels result=
-	MetricBGBlIndexEntries   = "gew_bgbl_index_entries"
+	MetricCatalogReady                = "gew_catalog_ready"
+	MetricDataFresh                   = "gew_data_fresh"
+	MetricSyncLastSuccess             = "gew_sync_last_success_timestamp_seconds"
+	MetricSyncJobsTotal               = "gew_sync_jobs_total"
+	MetricFreshnessLaws               = "gew_freshness_laws"
+	MetricExportCacheLookups          = "gew_export_cache_lookups_total"
+	MetricOutboundHTTP                = "gew_outbound_http_requests_total"
+	MetricDiscoveredLinks             = "gew_discovered_links"
+	MetricDiscoveryIngestTotal        = "gew_discovery_ingest_total" // labels result=
+	MetricBGBlIndexEntries            = "gew_bgbl_index_entries"
+	MetricStandRefreshFailuresTotal   = "gew_stand_refresh_failures_total"
+	MetricSyncStoreWriteFailuresTotal = "gew_sync_store_write_failures_total" // labels source
 )
 
 var (
@@ -70,6 +72,8 @@ func RegisterDefaults(r *Registry) {
 	r.RegisterHelp(MetricDiscoveredLinks, "Number of persisted discovered parent→child links", "gauge")
 	r.RegisterHelp(MetricDiscoveryIngestTotal, "Discovery ingest operations by result", "counter")
 	r.RegisterHelp(MetricBGBlIndexEntries, "Number of BGBl citation index entries", "gauge")
+	r.RegisterHelp(MetricStandRefreshFailuresTotal, "Stand refresh failures for individual laws", "counter")
+	r.RegisterHelp(MetricSyncStoreWriteFailuresTotal, "Sync job store write failures by source", "counter")
 }
 
 // CounterValue returns the current counter value for name+labels (0 if missing).

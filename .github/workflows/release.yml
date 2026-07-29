@@ -52,15 +52,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: anchore/syft-action@v0
+      - uses: anchore/sbom-action@v0
         with:
           path: .
-          output-format: spdx-json
+          format: spdx-json
           output-file: sbom.spdx.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sbom
-          path: sbom.spdx.json
+          artifact-name: sbom
+          upload-release-assets: false
 
   release:
     needs: [build, sbom]

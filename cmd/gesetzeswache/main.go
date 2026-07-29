@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -24,10 +25,11 @@ import (
 	"github.com/Squarenix17/gesetzeswache/internal/search"
 	"github.com/Squarenix17/gesetzeswache/internal/service"
 	"github.com/Squarenix17/gesetzeswache/internal/store"
-	"github.com/Squarenix17/gesetzeswache/internal/sync"
+	orchestratorsync "github.com/Squarenix17/gesetzeswache/internal/sync"
 )
 
-const version = "0.2.0"
+// var (not const) so release builds can inject the tag via -ldflags "-X main.version=...".
+var version = "0.2.0"
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -74,7 +76,7 @@ func run(args []string) int {
 	}
 	_ = loadVariantsFile(cfg.VariantsPath, st, eng, log)
 
-	orch := &sync.Orchestrator{CFG: cfg, Store: st, HTTP: httpClient, Search: eng, Log: log, Metrics: reg, Instruments: instrCat, Families: familyCat}
+	orch := &orchestratorsync.Orchestrator{CFG: cfg, Store: st, HTTP: httpClient, Search: eng, Log: log, Metrics: reg, Instruments: instrCat, Families: familyCat}
 	svc := &service.Service{
 		CFG:         cfg,
 		Store:       st,
@@ -96,6 +98,11 @@ func run(args []string) int {
 	case "version":
 		fmt.Println(version)
 		return 0
+	case "health":
+		if err := cli.HealthCheck(os.Getenv("GEW_HTTP_ADDR")); err != nil {
+			return 1
+		}
+		return 0
 	case "serve":
 		return serve(cfg, svc, orch, log)
 	case "mcp":
@@ -112,12 +119,27 @@ func run(args []string) int {
 	}
 }
 
-func serve(cfg config.Config, svc *service.Service, orch *sync.Orchestrator, log *slog.Logger) int {
+func serve(cfg config.Config, svc *service.Service, orch *orchestratorsync.Orchestrator, log *slog.Logger) int {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	srv := &apihttp.Server{Svc: svc, SharedSecret: cfg.SharedSecret, Metrics: svc.Metrics}
-	httpSrv := &http.Server{Addr: cfg.HTTPAddr, Handler: srv.Handler()}
+	srv := &apihttp.Server{Svc: svc, SharedSecret: cfg.SharedSecret, Metrics: svc.Metrics, Log: log}
+	// WriteTimeout must exceed GEW_HTTP_TIMEOUT (default 60s) so on-demand exports are not cut, and must
+	// cover the recheck handler bound (4×GEW_HTTP_TIMEOUT + 30s margin = 270s with defaults).
+	const (
+		readHeaderTimeout = 10 * time.Second
+		readTimeout       = 30 * time.Second
+		idleTimeout       = 120 * time.Second
+		writeTimeout      = 270 * time.Second
+	)
+	httpSrv := &http.Server{
+		Addr:              cfg.HTTPAddr,
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		IdleTimeout:       idleTimeout,
+		WriteTimeout:      writeTimeout,
+	}
 	go func() {
 		log.Info("http listening", "addr", cfg.HTTPAddr, "version", version)
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -126,7 +148,10 @@ func serve(cfg config.Config, svc *service.Service, orch *sync.Orchestrator, log
 		}
 	}()
 
+	var startupWg sync.WaitGroup
+	startupWg.Add(1)
 	go func() {
+		defer startupWg.Done()
 		cctx, ccancel := context.WithTimeout(ctx, 5*time.Minute)
 		log.Info("initial sync starting")
 		orch.InitialSync(cctx)
@@ -139,12 +164,14 @@ func serve(cfg config.Config, svc *service.Service, orch *sync.Orchestrator, log
 	shutdownCtx, scancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer scancel()
 	_ = httpSrv.Shutdown(shutdownCtx)
+	orch.Wait()
+	startupWg.Wait()
 	log.Info("shutdown complete")
 	return 0
 }
 
 func loadVariantsFile(path string, st *store.Store, eng *search.Engine, log *slog.Logger) error {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path is operator-controlled config (variants TSV)
 	if err != nil {
 		return err
 	}

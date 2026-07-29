@@ -13,11 +13,12 @@ import (
 
 // Response is a canned reply or transport-level error for a host+path route.
 type Response struct {
-	Status  int
-	Body    []byte
-	Header  http.Header
-	Err     error // if set, RoundTrip returns Err (no *http.Response)
-	ETag    string
+	Status            int
+	Body              []byte
+	Header            http.Header
+	Err               error // if set, RoundTrip returns Err (no *http.Response)
+	ETag              string
+	BlockUntilContext bool // if true, block until req.Context() is done
 }
 
 // Transport maps "host|path" keys to canned responses. Unmatched routes return 404.
@@ -93,6 +94,10 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 			Request:    req,
 		}, nil
 	}
+	if resp.BlockUntilContext {
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	}
 	if resp.Err != nil {
 		return nil, resp.Err
 	}
@@ -110,11 +115,11 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		status = http.StatusOK
 	}
 	return &http.Response{
-		StatusCode: status,
-		Status:     fmt.Sprintf("%d %s", status, http.StatusText(status)),
-		Body:       io.NopCloser(bytes.NewReader(resp.Body)),
-		Header:     hdr,
-		Request:    req,
+		StatusCode:    status,
+		Status:        fmt.Sprintf("%d %s", status, http.StatusText(status)),
+		Body:          io.NopCloser(bytes.NewReader(resp.Body)),
+		Header:        hdr,
+		Request:       req,
 		ContentLength: int64(len(resp.Body)),
 	}, nil
 }

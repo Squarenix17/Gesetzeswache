@@ -208,16 +208,19 @@ All settings use the `GEW_` environment prefix. Essential variables:
 | `GEW_DISCOVERY_MAX_PER_CYCLE` | `50` | Max Verordnungen to ingest per discovery pass |
 | `GEW_FORTSCHREIBUNG_FAMILIES_PATH` | `variants/fortschreibung_families.tsv` | Consumer→Fortschreibung slug-prefix families |
 
-Additional sync intervals, source URLs, and tuning knobs: [`internal/config/config.go`](internal/config/config.go).
+Additional sync intervals, source URLs, and tuning knobs: [`.env.example`](.env.example) and [`internal/config/config.go`](internal/config/config.go).
 
 ### Docker
 
 Image: `ghcr.io/squarenix17/gesetzeswache:latest` (pinned tags on [releases](https://github.com/Squarenix17/gesetzeswache/releases))
 
 ```bash
+export GEW_SHARED_SECRET="$(openssl rand -hex 32)"
 docker compose up -d
 curl http://127.0.0.1:8080/readyz
 ```
+
+`GEW_SHARED_SECRET` is required for Compose (no default). Host port **8080** maps to the container.
 
 Stop:
 
@@ -225,11 +228,13 @@ Stop:
 docker compose down
 ```
 
-Override `GEW_*` in [`docker-compose.yml`](docker-compose.yml) under `environment:`, or run manually:
+Override other `GEW_*` in [`docker-compose.yml`](docker-compose.yml) under `environment:`, or run manually:
 
 ```bash
-docker run --rm -p 8080:8080 -v gew-data:/tmp ghcr.io/squarenix17/gesetzeswache:latest
+docker run --rm -p 8080:8080 -e GEW_SHARED_SECRET="$(openssl rand -hex 32)" -v gew-data:/tmp ghcr.io/squarenix17/gesetzeswache:latest
 ```
+
+See [`.env.example`](.env.example) for the full variable list and [`SECURITY.md`](SECURITY.md) for reporting vulnerabilities.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 

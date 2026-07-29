@@ -27,6 +27,7 @@ go.work.sum
 # Secrets and credentials
 .env
 .env.*
+!.env.example
 *.pem
 credentials.json
 *credentials*
@@ -39,9 +40,25 @@ credentials.json
 *.bolt
 gesetzeswache.db
 
-# IDE (keep .cursor/ trackable)
+# IDE / Cursor: keep full ECC locally; track only shared Go agent rules + Go agents
 .idea/
 .vscode/
+.cursor/*
+!.cursor/rules/
+!.cursor/agents/
+.cursor/rules/*
+.cursor/agents/*
+!.cursor/rules/golang-coding-style.mdc
+!.cursor/rules/golang-hooks.mdc
+!.cursor/rules/golang-patterns.mdc
+!.cursor/rules/golang-security.mdc
+!.cursor/rules/golang-testing.mdc
+!.cursor/rules/common-security.mdc
+!.cursor/rules/common-coding-style.mdc
+!.cursor/rules/common-testing.mdc
+!.cursor/rules/common-patterns.mdc
+!.cursor/agents/go-reviewer.md
+!.cursor/agents/go-build-resolver.md
 
 # OS noise
 .DS_Store

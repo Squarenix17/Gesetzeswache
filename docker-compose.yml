@@ -4,9 +4,10 @@ services:
     image: gesetzeswache:local
     container_name: gew
     ports:
-      - "18081:8080"
+      - "8080:8080"
     environment:
-      GEW_SHARED_SECRET: ${GEW_SHARED_SECRET:-change-me}
+      # Required: generate with `openssl rand -hex 32` (no default — compose fails if unset)
+      GEW_SHARED_SECRET: ${GEW_SHARED_SECRET:?Set GEW_SHARED_SECRET before docker compose up}
       GEW_DISCOVERY_ENABLED: "true"
       GEW_DISCOVERY_MAX_PER_CYCLE: "50"
     volumes:

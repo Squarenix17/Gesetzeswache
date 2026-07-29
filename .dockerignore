@@ -1,0 +1,27 @@
+# Build context hygiene — keep image lean and free of local harness/data
+.git
+.github
+.cursor
+.tmp
+tmp
+docs
+variants/README.md
+*.md
+!LICENSE
+.env
+.env.*
+*.db
+*.db-journal
+*.bolt
+coverage.out
+coverage.html
+*.coverprofile
+bin
+dist
+*.test
+*.out
+.idea
+.vscode
+.dockerignore
+Dockerfile
+docker-compose.yml

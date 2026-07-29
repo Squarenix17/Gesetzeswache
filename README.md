@@ -61,6 +61,22 @@
 - **Not a statute mirror:** lightweight catalog and sync state (embedded bbolt), not a permanent copy of all law full text
 - **Not legal advice:** helps locate and verify official statute references; interpretation is out of scope
 
+### Current Verification Status
+
+Fail-closed freshness verification is **implemented**:
+
+- **GII feed success** gates `confirmed_current` (no confirmation without successful feed evidence)
+- **BGBl/ELI probe clock** unified: probe-only evidence never confirms; falls through to `uncertain`
+- **Sync/store/write/read failures** fail closed → `uncertain`
+- **Future/clock-jump timestamps** rejected (±5 min future tolerance; no backwards stamp moves)
+- **Partial BGBl feed failure** sets a self-healing degraded marker until the next full success
+- **Golden regression tests** pin happy-path resolve/freshness outputs
+- **CI** runs blocking `govulncheck`, `gosec`, `staticcheck`, race detector, and per-package coverage floors (`service`/`apihttp`/`sync`/`store` ≥80%)
+
+**Not yet:**
+
+- Per-law sync evidence timestamps on `/v1/sync/status` (roadmap)
+
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- USAGE -->
@@ -213,6 +229,8 @@ Additional sync intervals, source URLs, and tuning knobs: [`.env.example`](.env.
 ### Docker
 
 Image: `ghcr.io/squarenix17/gesetzeswache:latest` (pinned tags on [releases](https://github.com/Squarenix17/gesetzeswache/releases))
+
+The image ships a `HEALTHCHECK` via `gew health`; Kubernetes liveness/readiness probes can keep using `/healthz` and `/readyz`.
 
 ```bash
 export GEW_SHARED_SECRET="$(openssl rand -hex 32)"

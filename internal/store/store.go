@@ -1,4 +1,8 @@
 // Package store provides an embedded bbolt persistence layer.
+//
+// bbolt usage contract: use View for read-only operations and Update for atomic
+// read-modify-write. Transactions are flat—never nested. Single-writer
+// serialization is intentional.
 package store
 
 import (

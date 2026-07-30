@@ -91,6 +91,15 @@ var commandHelp = []commandDoc{
 		},
 	},
 	{
+		name:    "bundle",
+		summary: "Export Gesetz + current linked Verordnungen (unmixed; optional --compose display)",
+		examples: []string{
+			`gew bundle MiLoG normtext`,
+			`gew bundle --compose MiLoG hierarchical`,
+			`gew bundle --include=past MiLoG hierarchical`,
+		},
+	},
+	{
 		name:    "mcp",
 		summary: "Run MCP server on stdio (JSON-RPC tools)",
 		examples: []string{

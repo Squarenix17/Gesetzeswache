@@ -46,6 +46,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/recheck", s.recheck)
 	mux.HandleFunc("/v1/sync/status", s.syncStatus)
 	mux.HandleFunc("/v1/export", s.export)
+	mux.HandleFunc("/v1/bundle", s.bundle)
 	if s.Metrics == nil {
 		s.Metrics = metrics.NewRegistry()
 		metrics.RegisterDefaults(s.Metrics)
@@ -336,6 +337,70 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 			s.write(w, 502, res, msg)
 		default:
 			s.logError(r.Context(), "export", err)
+			s.write(w, 502, res, clienterr.Internal)
+		}
+		return
+	}
+	s.write(w, 200, res, "")
+}
+
+func (s *Server) bundle(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	formats := r.URL.Query()["format"]
+	if len(formats) == 1 && strings.Contains(formats[0], ",") {
+		formats = strings.Split(formats[0], ",")
+	}
+	compose := false
+	for _, v := range r.URL.Query()["compose"] {
+		if v == "1" || strings.EqualFold(v, "true") || v == "" {
+			compose = true
+		}
+	}
+	includeValues := append([]string{}, r.URL.Query()["include"]...)
+	if q == "" && r.Body != nil && r.Body != http.NoBody {
+		var body struct {
+			Query   string   `json:"query"`
+			Formats []string `json:"formats"`
+			Compose bool     `json:"compose"`
+			Include string   `json:"include"`
+		}
+		if err := decodeJSON(w, r, &body); err != nil && err != io.EOF {
+			s.write(w, 400, nil, "invalid json body")
+			return
+		}
+		if q == "" {
+			q = body.Query
+		}
+		if len(formats) == 0 {
+			formats = body.Formats
+		}
+		compose = compose || body.Compose
+		if body.Include != "" {
+			includeValues = append(includeValues, body.Include)
+		}
+	}
+	inc := service.MergeInclude(includeValues)
+	opts := service.BundleOpts{Past: inc.Past, Compose: compose}
+	var fmts []string
+	if len(formats) != 0 {
+		fmts = formats
+	}
+	res, err := s.Svc.ExportOperativeBundle(r.Context(), q, fmts, opts)
+	if err != nil {
+		msg := s.clientError(err)
+		switch {
+		case errors.Is(err, service.ErrQueryTooLong):
+			s.write(w, 400, nil, msg)
+		case msg == "export disabled", strings.HasPrefix(msg, "unknown format"), msg == "empty format list",
+			strings.HasPrefix(msg, "operative bundle too large"):
+			s.write(w, 400, nil, msg)
+		case msg == "export refused: bundle member confirmed_stale", msg == "export refused: law confirmed_stale":
+			s.write(w, 502, res, msg)
+		case msg == clienterr.Internal:
+			s.logError(r.Context(), "bundle", err)
+			s.write(w, 502, res, msg)
+		default:
+			s.logError(r.Context(), "bundle", err)
 			s.write(w, 502, res, clienterr.Internal)
 		}
 		return

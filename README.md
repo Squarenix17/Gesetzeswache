@@ -92,10 +92,10 @@ REST and CLI wrap payloads in a JSON envelope:
 
 Any client: RAG pipeline, search index, agent tool, or application, must treat freshness as part of the API contract:
 
-1. **Always read freshness on matched results**, resolve/export: `data.freshness.state`; `GET /v1/freshness`: `data.state`
-2. **Embed or serve as current only when** state is `confirmed_current`, confidence is high, and Stand `parse_ok` is true (amendment-by-reference laws may otherwise look current while a linked Verordnung moved)
+1. **Always read freshness on matched results**, resolve/export: `data.freshness.state`; `GET /v1/freshness`: `data.state`; bundle: `data.bundle_freshness` and per-member freshness
+2. **Embed or serve as current only when** state is `confirmed_current`, confidence is high, and Stand `parse_ok` is true (amendment-by-reference laws may otherwise look current while a linked Verordnung moved). For bundles, serve as current only when `bundle_freshness.safe_to_serve` is true (fail-closed over all members).
 3. **Quarantine or flag for manual review** when state is `confirmed_stale` or `uncertain`
-4. **Never index or serve law text while ignoring freshness metadata**
+4. **Never index or serve law text while ignoring freshness metadata**. For amendment-by-reference parents, index `parent.formats` and `operative[].formats` as **separate** chunks linked by `operative[].link.section_hint` — do not embed optional composed hierarchical.
 
 BGBl issue identity is always the triple `(teil, year, number)`, never compare issue number alone.
 
@@ -109,7 +109,7 @@ BGBl issue identity is always the triple `(teil, year, number)`, never compare i
 
 Optional: set `GEW_REFUSE_EXPORT_STALE=true` so the server rejects export for `confirmed_stale` laws.
 
-Amendment-by-reference parents (e.g. MiLoG, SGB XI § 55) expose `freshness.linked_instruments`: **section-scoped** ordinances with Inkrafttreten (`effective_from`), `section_hint`, and `status` (`current`/`future` by default; superseded `past` only with `include=past`). They are not full-law replacements — export the child slug (e.g. `milov5`, `pbav_2025`) for operative § text.
+Amendment-by-reference parents (e.g. MiLoG, SGB XI § 55) expose `freshness.linked_instruments`: **section-scoped** ordinances with Inkrafttreten (`effective_from`), `section_hint`, and `status` (`current`/`future` by default; superseded `past` only with `include=past`). They are not full-law replacements — use `gew bundle` / `GET /v1/bundle` for parent + current linked Verordnungen in one call (unmixed formats), or export the child slug alone (e.g. `milov5`, `pbav_2025`).
 
 **Automatic discovery (Phase 4.8):** when a Verordnung is ingested (GII feed / TOC / capped discovery / export), its Ermächtigung is parsed and high-confidence parent→child links are stored automatically (`source=discovered`). Bundle Verordnungen that authorize multiple parent books (e.g. SVBezGrV → SGB IV/V/VI) link **each uniquely resolved parent**. Manual [`variants/linked_instruments.tsv`](variants/linked_instruments.tsv) remains an **override** (wins on collision), not the primary update channel. Fortschreibung / yearly-ordinance families (e.g. SGB II → current `rbsfv_*`, SGB VI → current `bsv_*` / `rvbeitrsbek_*`) attach via [`variants/fortschreibung_families.tsv`](variants/fortschreibung_families.tsv) (`source=seeded`, latest catalog year; same-prefix discovered years suppressed). Config: `GEW_DISCOVERY_ENABLED` (default true), `GEW_DISCOVERY_MAX_PER_CYCLE` (default 50), `GEW_FORTSCHREIBUNG_FAMILIES_PATH`.
 
@@ -125,12 +125,14 @@ Amendment-by-reference parents (e.g. MiLoG, SGB XI § 55) expose `freshness.link
 | GET | `/v1/stale` | List `confirmed_stale` laws |
 | GET | `/v1/sync/status` | Sync and readiness status |
 | GET, POST | `/v1/export?q=&format=hierarchical\|chunked\|flat\|normtext` | On-demand text export (same `include`) |
+| GET, POST | `/v1/bundle?q=&format=` | Parent + current linked Verordnungen (`include=past`, `compose=true` optional) |
 | POST | `/v1/recheck` | Force re-verification (auth required) |
 
 ```bash
 curl 'http://127.0.0.1:8080/v1/resolve?q=BGB'
 curl 'http://127.0.0.1:8080/v1/resolve?q=MiLoG&include=linked'
 curl 'http://127.0.0.1:8080/v1/export?q=BGB&format=hierarchical'
+curl 'http://127.0.0.1:8080/v1/bundle?q=MiLoG&format=normtext'
 curl 'http://127.0.0.1:8080/v1/sync/status'
 curl -s 'http://127.0.0.1:8080/metrics' | head
 ```
@@ -146,6 +148,7 @@ gew stale                    # List confirmed_stale laws
 gew recheck bgb              # Force re-verification
 gew sync-status              # Sync readiness
 gew export BGB hierarchical  # On-demand text export
+gew bundle MiLoG normtext    # Parent + current linked Verordnungen
 gew mcp                      # MCP stdio server
 ```
 
@@ -157,6 +160,7 @@ Run `gew mcp` and connect your MCP client.
 |------|---------|
 | `resolve_law` | Resolve by abbreviation/title + freshness |
 | `export_law_text` | Export text (`hierarchical`, `chunked`, `flat`, `normtext`) |
+| `export_law_bundle` | Parent + current linked Verordnungen (unmixed; optional `compose`) |
 | `law_freshness` | Freshness for a known law ID or abbreviation |
 | `list_stale_laws` | List laws currently `confirmed_stale` |
 | `force_recheck` | Force out-of-band re-verification |
@@ -181,7 +185,7 @@ Linked ordinances (amendment-by-reference) live in [`variants/linked_instruments
 
 ### Prerequisites
 
-- **Go 1.21+:** to build from source
+- **Go 1.26+:** to build from source
 - **Docker:** (optional) to run the published container image
 - **Network:** outbound HTTPS to GII and `recht.bund.de` for sync and export
 
@@ -196,6 +200,15 @@ Linked ordinances (amendment-by-reference) live in [`variants/linked_instruments
    ```sh
    go build -o bin/gew ./cmd/gesetzeswache
    ```
+   Or download a release binary into `bin/` ([releases](https://github.com/Squarenix17/Gesetzeswache/releases)): `gew_linux_amd64` → `bin/gew`, then `chmod +x bin/gew`.
+
+   Run with `./bin/gew …` from the repo root, **or** put `bin` on your `PATH` so `gew` works without the prefix:
+   ```sh
+   export PATH="$(pwd)/bin:$PATH"   # this shell only
+   # optional permanent: ln -sf "$(pwd)/bin/gew" ~/.local/bin/gew
+   ```
+   CLI and `serve` both use `gesetzeswache.db` — run **one at a time** (not both).
+
 3. Run the server
    ```sh
    ./bin/gew serve

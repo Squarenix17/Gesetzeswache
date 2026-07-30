@@ -23,6 +23,7 @@ var exactAllowlist = map[string]struct{}{
 	"export disabled":                     {},
 	"empty format list":                   {},
 	"export refused: law confirmed_stale": {},
+	"export refused: bundle member confirmed_stale":                 {},
 	"unauthorized: set GEW_SHARED_SECRET and X-Gesetzeswache-Token": {},
 	"recheck timed out":              {},
 	"parse error":                    {},
@@ -58,6 +59,7 @@ func isAllowed(msg string) bool {
 		"unknown format ",
 		"unknown tool ",
 		"method not found: ",
+		"operative bundle too large",
 	} {
 		if strings.HasPrefix(msg, prefix) {
 			return true

@@ -216,6 +216,12 @@ func tools() []map[string]any {
 			"formats": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 			"include": map[string]any{"type": "string", "description": "Comma-separated: past, linked"},
 		}, []string{"query"}),
+		tool("export_law_bundle", "Export a Gesetz plus current linked Verordnungen as separate indexable members (parent + operative[]). Parent text is never merged with VO body. Args: query (required); formats (optional); include (optional past); compose (optional bool) — display-only hierarchical callout, do not embed.", map[string]any{
+			"query":   map[string]any{"type": "string"},
+			"formats": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			"include": map[string]any{"type": "string", "description": "Comma-separated: past"},
+			"compose": map[string]any{"type": "boolean", "description": "Emit display-only composed hierarchical; not for vector ingest"},
+		}, []string{"query"}),
 	}
 }
 
@@ -262,8 +268,37 @@ func callTool(ctx context.Context, svc *service.Service, name string, args map[s
 			}
 		}
 		return svc.ExportText(ctx, str(args["query"]), formats, opts)
+	case "export_law_bundle":
+		var formats []string
+		if v, ok := args["formats"]; ok {
+			switch t := v.(type) {
+			case []any:
+				for _, x := range t {
+					formats = append(formats, fmt.Sprint(x))
+				}
+			case []string:
+				formats = t
+			case string:
+				if t != "" {
+					formats = strings.Split(t, ",")
+				}
+			}
+		}
+		bopts := service.BundleOpts{Past: opts.Past, Compose: boolArg(args["compose"])}
+		return svc.ExportOperativeBundle(ctx, str(args["query"]), formats, bopts)
 	default:
 		return nil, fmt.Errorf("unknown tool %s", name)
+	}
+}
+
+func boolArg(v any) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		return strings.EqualFold(strings.TrimSpace(t), "true") || t == "1"
+	default:
+		return false
 	}
 }
 

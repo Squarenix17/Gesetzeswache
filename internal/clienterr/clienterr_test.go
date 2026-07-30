@@ -16,6 +16,7 @@ func TestSanitize_intentionalExact(t *testing.T) {
 		"law id required",
 		"law not found",
 		"export refused: law confirmed_stale",
+		"export refused: bundle member confirmed_stale",
 		"recheck timed out",
 	} {
 		if got := Sanitize(errors.New(msg)); got != msg {

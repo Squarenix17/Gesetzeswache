@@ -190,29 +190,10 @@ func (s *Service) freshnessFor(lawID string, opts IncludeOpts) (FreshnessMeta, e
 	if discErr != nil && s.Log != nil {
 		s.Log.Warn("discovered links read failed", "law", lawID, "err", discErr)
 	}
-	// Operative linked instruments exclude soft Gesetz discovery FPs (Phase 6 demotion).
 	operativeLinked := instruments.FilterOperativeLinked(s.Store, linkedRows)
 	hasLinked := len(operativeLinked) > 0 || discErr != nil
 	instrRefs, instrIssues := instruments.CollectEvidence(s.Store, operativeLinked, lawID, stand)
-	// Ensure all linked instrument children exist as law stubs (seeded, family, discovered).
-	ensured := map[string]struct{}{}
-	for _, li := range linkedRows {
-		slug := strings.TrimSpace(li.GIISlug)
-		if slug == "" {
-			continue
-		}
-		if _, done := ensured[slug]; done {
-			continue
-		}
-		ensured[slug] = struct{}{}
-		if _, neu, err := instruments.EnsureLawFromSlug(s.Store, s.CFG.GIIBase, slug); err != nil {
-			if s.Log != nil {
-				s.Log.Warn("ensure linked child", "law", lawID, "slug", slug, "err", err)
-			}
-		} else if neu {
-			s.refreshSearchIndex()
-		}
-	}
+	s.ensureLinkedLawStubs(linkedRows)
 	seeded := instruments.AnnotateChain(operativeLinked, now)
 	linked := instruments.FilterLinkedForResponse(seeded, opts.Past)
 	if opts.Linked {
@@ -293,6 +274,37 @@ func (s *Service) linkedInstrumentsFor(lawID string) ([]domain.LinkedInstrument,
 		}
 	}
 	return discovery.Merge(seeded, discovered), nil
+}
+
+// ensureLinkedLawStubs creates catalog stubs for every linked GII slug.
+func (s *Service) ensureLinkedLawStubs(linkedRows []domain.LinkedInstrument) {
+	ensured := map[string]struct{}{}
+	for _, li := range linkedRows {
+		slug := strings.TrimSpace(li.GIISlug)
+		if slug == "" {
+			continue
+		}
+		if _, done := ensured[slug]; done {
+			continue
+		}
+		ensured[slug] = struct{}{}
+		if _, neu, err := instruments.EnsureLawFromSlug(s.Store, s.CFG.GIIBase, slug); err != nil {
+			if s.Log != nil {
+				s.Log.Warn("ensure linked child", "slug", slug, "err", err)
+			}
+		} else if neu {
+			s.refreshSearchIndex()
+		}
+	}
+}
+
+// operativeAnnotatedLinked returns FilterOperativeLinked → AnnotateChain for a parent law.
+// It also ensures child law stubs exist. The second return is a discovery/read error (non-fatal).
+func (s *Service) operativeAnnotatedLinked(lawID string, now time.Time) ([]domain.LinkedInstrument, error) {
+	linkedRows, discErr := s.linkedInstrumentsFor(lawID)
+	s.ensureLinkedLawStubs(linkedRows)
+	operativeLinked := instruments.FilterOperativeLinked(s.Store, linkedRows)
+	return instruments.AnnotateChain(operativeLinked, now), discErr
 }
 
 func (s *Service) refreshSearchIndex() {

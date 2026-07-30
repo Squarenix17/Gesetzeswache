@@ -59,6 +59,19 @@ func Run(ctx context.Context, svc *service.Service, args []string) int {
 		}
 		res, err := svc.ExportText(ctx, q, formats, opts)
 		return printJSON(res, err)
+	case "bundle":
+		opts, rest := peelBundleFlags(args[1:])
+		if len(rest) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: bundle [--include=past] [--compose] <query> [formats: hierarchical|chunked|flat|normtext]")
+			return 2
+		}
+		var formats []string
+		q := rest[0]
+		if len(rest) > 1 {
+			formats = strings.Split(rest[1], ",")
+		}
+		res, err := svc.ExportOperativeBundle(ctx, q, formats, opts)
+		return printJSON(res, err)
 	default:
 		if args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 			PrintUsage()
@@ -84,6 +97,25 @@ func peelIncludeFlags(args []string) (service.IncludeOpts, []string) {
 			continue
 		}
 		rest = append(rest, a)
+	}
+	return opts, rest
+}
+
+func peelBundleFlags(args []string) (service.BundleOpts, []string) {
+	var opts service.BundleOpts
+	var rest []string
+	for _, a := range args {
+		switch {
+		case a == "--compose":
+			opts.Compose = true
+		case strings.HasPrefix(a, "--include="):
+			part := service.ParseInclude(strings.TrimPrefix(a, "--include="))
+			opts.Past = opts.Past || part.Past
+		case a == "--include":
+			continue
+		default:
+			rest = append(rest, a)
+		}
 	}
 	return opts, rest
 }

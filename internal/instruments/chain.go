@@ -104,6 +104,25 @@ func FilterLinkedForResponse(rows []domain.LinkedInstrument, includePast bool) [
 	return out
 }
 
+// FilterBundleMembers keeps status=current; keeps past iff includePast; always drops future and empty status.
+// Bundle membership is stricter than FilterLinkedForResponse (which retains future).
+func FilterBundleMembers(rows []domain.LinkedInstrument, includePast bool) []domain.LinkedInstrument {
+	out := make([]domain.LinkedInstrument, 0, len(rows))
+	for _, row := range rows {
+		switch row.Status {
+		case StatusCurrent:
+			out = append(out, row)
+		case StatusPast:
+			if includePast {
+				out = append(out, row)
+			}
+		default:
+			// StatusFuture and empty status are excluded from operative bundles.
+		}
+	}
+	return out
+}
+
 func normalizeSectionHint(hint string) string {
 	h := strings.TrimSpace(hint)
 	if h == "" {

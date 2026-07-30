@@ -147,6 +147,43 @@ var (
 	reFootnote       = regexp.MustCompile(`(?i)^(fn|fußnote|fussnote)\b`)
 )
 
+// isTOCRef reports GII table-of-contents enbez labels (any law).
+func isTOCRef(sectionRef string) bool {
+	ref := strings.TrimSpace(sectionRef)
+	return strings.EqualFold(ref, "Inhaltsübersicht") ||
+		strings.EqualFold(ref, "Inhaltsverzeichnis")
+}
+
+// isOperativeSectionRef reports section refs that carry operative law text (any law).
+// Includes §… and common non-§ containers such as Eingangsformel; excludes TOC.
+func isOperativeSectionRef(sectionRef string) bool {
+	ref := strings.TrimSpace(sectionRef)
+	if ref == "" || isTOCRef(ref) {
+		return false
+	}
+	if reSectionRef.MatchString(ref) {
+		return true
+	}
+	if strings.EqualFold(ref, "Eingangsformel") {
+		return true
+	}
+	// e.g. "(XXXX) §§ 3 bis 6" statute placeholders
+	if strings.Contains(ref, "§") {
+		return true
+	}
+	return false
+}
+
+// isVectorUnit is embeddable operative text for normtext/chunked.
+func isVectorUnit(u Unit) bool {
+	return u.Kind == KindNormtext
+}
+
+// skipHierarchicalChrome drops TOC and editorial preamble from human hierarchical.
+func skipHierarchicalChrome(u Unit) bool {
+	return isTOCRef(u.SectionRef) || u.Kind == KindPreamble
+}
+
 func classifyUnit(text, abbr, sectionRef string, isGliederung bool) UnitKind {
 	t := strings.TrimSpace(text)
 	if t == "" {
@@ -154,6 +191,9 @@ func classifyUnit(text, abbr, sectionRef string, isGliederung bool) UnitKind {
 	}
 	if abbr != "" && t == abbr {
 		return KindNoise
+	}
+	if isTOCRef(sectionRef) {
+		return KindPreamble
 	}
 	if strings.Contains(t, "(+++") {
 		return KindPreamble
@@ -170,10 +210,10 @@ func classifyUnit(text, abbr, sectionRef string, isGliederung bool) UnitKind {
 	if reFootnote.MatchString(t) {
 		return KindFootnote
 	}
-	if reSectionRef.MatchString(sectionRef) {
+	if isOperativeSectionRef(sectionRef) {
 		return KindNormtext
 	}
-	// Citation-only orphans (no § context) — not operative normtext.
+	// Citation-only orphans (no operative §/Formel context) — not embeddable normtext.
 	if strings.Contains(t, "BGBl") || strings.Contains(t, "CELEX") {
 		return KindPreamble
 	}
@@ -521,6 +561,9 @@ func EmitHierarchical(ir IR) string {
 	b.WriteByte('\n')
 	curSec := ""
 	for _, u := range ir.Units {
+		if skipHierarchicalChrome(u) {
+			continue
+		}
 		header := u.SectionTitle
 		if header == "" {
 			header = u.SectionRef
@@ -588,10 +631,13 @@ func chunkFromUnit(ir IR, u Unit, stand domain.StandCitation, fresh domain.Fresh
 	}
 }
 
-// EmitChunked builds chunk payloads with identical unit boundaries.
+// EmitChunked builds vector-oriented chunk payloads (operative KindNormtext only).
 func EmitChunked(ir IR, stand domain.StandCitation, fresh domain.FreshnessRecord) []Chunk {
 	out := make([]Chunk, 0, len(ir.Units))
 	for _, u := range ir.Units {
+		if !isVectorUnit(u) {
+			continue
+		}
 		out = append(out, chunkFromUnit(ir, u, stand, fresh))
 	}
 	return out
@@ -601,7 +647,7 @@ func EmitChunked(ir IR, stand domain.StandCitation, fresh domain.FreshnessRecord
 func EmitNormtext(ir IR, stand domain.StandCitation, fresh domain.FreshnessRecord) []Chunk {
 	out := make([]Chunk, 0, len(ir.Units))
 	for _, u := range ir.Units {
-		if u.Kind != KindNormtext {
+		if !isVectorUnit(u) {
 			continue
 		}
 		out = append(out, chunkFromUnit(ir, u, stand, fresh))

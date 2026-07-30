@@ -100,6 +100,15 @@ var commandHelp = []commandDoc{
 		},
 	},
 	{
+		name:    "index",
+		summary: "Flat ingest-ready chunks for parent + current linked Verordnungen (optional --section)",
+		examples: []string{
+			`gew index MiLoG`,
+			`gew index MiLoG --section='§ 1'`,
+			`gew index --include=past MiLoG --section='§ 1,§ 2'`,
+		},
+	},
+	{
 		name:    "mcp",
 		summary: "Run MCP server on stdio (JSON-RPC tools)",
 		examples: []string{

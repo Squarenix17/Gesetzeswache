@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dokument SYSTEM "https://www.gesetze-im-internet.de/dtd/1.01/gii-norm.dtd">
+<dokument>
+  <norm builddate="20260101120000" doknr="BJNR000000000BJNE000010000">
+    <metadaten>
+      <jurabk>DEMO2</jurabk>
+      <langue>Demo Gesetz Zwei</langue>
+      <enbez>Inhaltsübersicht</enbez>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P>
+            <table frame="none" tocentry="%yes;">
+              <tgroup cols="2">
+                <tbody>
+                  <row><entry>Erster Abschnitt</entry></row>
+                  <row><entry>§ 1</entry><entry>Aufgaben</entry></row>
+                </tbody>
+              </tgroup>
+            </table>
+          </P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+  <norm builddate="20260101120001" doknr="BJNR000000000BJNE000011000">
+    <metadaten>
+      <jurabk>DEMO2</jurabk>
+      <enbez>§ 1</enbez>
+      <titel format="parat">Aufgaben</titel>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P nr="1">Das Gesetz regelt soziale Rechte.</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+</dokument>

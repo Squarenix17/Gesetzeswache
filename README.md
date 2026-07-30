@@ -52,7 +52,7 @@
 ### What it is
 
 - **Interfaces:** HTTP REST, local CLI (`gew`), MCP over stdio
-- **Optional text export:** on-demand `hierarchical`, `chunked`, `flat`, or `normtext` formats for RAG and indexing pipelines, no durable full-text corpus is stored
+- **Optional text export:** on-demand `hierarchical`, `chunked`, `flat`, or `normtext` formats for RAG and indexing pipelines, no durable full-text corpus is stored. Vector formats (`chunked`, `normtext`) omit `Inhaltsübersicht` / table-of-contents chrome and other editorial preamble (`+++` markers); `flat` retains the full IR.
 - **Env prefix:** `GEW_*` (matches the `gew` binary nickname)
 
 ### What it is not
@@ -95,7 +95,7 @@ Any client: RAG pipeline, search index, agent tool, or application, must treat f
 1. **Always read freshness on matched results**, resolve/export: `data.freshness.state`; `GET /v1/freshness`: `data.state`; bundle: `data.bundle_freshness` and per-member freshness
 2. **Embed or serve as current only when** state is `confirmed_current`, confidence is high, and Stand `parse_ok` is true (amendment-by-reference laws may otherwise look current while a linked Verordnung moved). For bundles, serve as current only when `bundle_freshness.safe_to_serve` is true (fail-closed over all members).
 3. **Quarantine or flag for manual review** when state is `confirmed_stale` or `uncertain`
-4. **Never index or serve law text while ignoring freshness metadata**. For amendment-by-reference parents, index `parent.formats` and `operative[].formats` as **separate** chunks linked by `operative[].link.section_hint` — do not embed optional composed hierarchical.
+4. **Never index or serve law text while ignoring freshness metadata**. For amendment-by-reference parents, index `parent.formats` and `operative[].formats` as **separate** chunks linked by `operative[].link.section_hint` — do not embed optional composed hierarchical. Vector formats (`normtext`, `chunked`) omit Inhaltsübersicht and editorial `(+++ … +++ )` markers; operative `§` text is kept.
 
 BGBl issue identity is always the triple `(teil, year, number)`, never compare issue number alone.
 
@@ -126,6 +126,7 @@ Amendment-by-reference parents (e.g. MiLoG, SGB XI § 55) expose `freshness.link
 | GET | `/v1/sync/status` | Sync and readiness status |
 | GET, POST | `/v1/export?q=&format=hierarchical\|chunked\|flat\|normtext` | On-demand text export (same `include`) |
 | GET, POST | `/v1/bundle?q=&format=` | Parent + current linked Verordnungen (`include=past`, `compose=true` optional) |
+| GET, POST | `/v1/index?q=` | Flat ingest-ready chunks (`section=§1,§2`, `include=past` optional) |
 | POST | `/v1/recheck` | Force re-verification (auth required) |
 
 ```bash
@@ -133,6 +134,7 @@ curl 'http://127.0.0.1:8080/v1/resolve?q=BGB'
 curl 'http://127.0.0.1:8080/v1/resolve?q=MiLoG&include=linked'
 curl 'http://127.0.0.1:8080/v1/export?q=BGB&format=hierarchical'
 curl 'http://127.0.0.1:8080/v1/bundle?q=MiLoG&format=normtext'
+curl 'http://127.0.0.1:8080/v1/index?q=MiLoG'
 curl 'http://127.0.0.1:8080/v1/sync/status'
 curl -s 'http://127.0.0.1:8080/metrics' | head
 ```
@@ -149,6 +151,7 @@ gew recheck bgb              # Force re-verification
 gew sync-status              # Sync readiness
 gew export BGB hierarchical  # On-demand text export
 gew bundle MiLoG normtext    # Parent + current linked Verordnungen
+gew index MiLoG              # Flat chunks for vector ingest
 gew mcp                      # MCP stdio server
 ```
 

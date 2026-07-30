@@ -55,3 +55,10 @@ func TestSanitize_unknownFormatPrefix(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestSanitize_indexPrefix(t *testing.T) {
+	msg := "index: unexpected chunked type []int"
+	if got := Sanitize(errors.New(msg)); got != msg {
+		t.Fatalf("got %q", got)
+	}
+}

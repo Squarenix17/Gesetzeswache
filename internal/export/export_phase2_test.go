@@ -145,12 +145,13 @@ func TestChunkedKindAndSectionRef(t *testing.T) {
 		t.Fatal(err)
 	}
 	chunks := EmitChunked(ir, domain.StandCitation{Raw: "Stand: x"}, domain.FreshnessRecord{State: domain.FreshnessConfirmedCurrent})
-	if len(chunks) != len(ir.Units) {
-		t.Fatalf("boundary mismatch chunks=%d units=%d", len(chunks), len(ir.Units))
+	vectorIDs := vectorUnitIDs(ir)
+	if len(chunks) != len(vectorIDs) {
+		t.Fatalf("boundary mismatch chunks=%d vector=%d ir=%d", len(chunks), len(vectorIDs), len(ir.Units))
 	}
 	var hasKind, hasRef bool
 	for i, c := range chunks {
-		if c.UnitID != ir.Units[i].ID {
+		if c.UnitID != vectorIDs[i] {
 			t.Fatalf("unit_id mismatch at %d", i)
 		}
 		if c.Kind == "" {
@@ -177,8 +178,8 @@ func TestNormtextFormatFilters(t *testing.T) {
 	if len(norm) == 0 {
 		t.Fatal("normtext empty")
 	}
-	if len(norm) >= len(all) {
-		t.Fatalf("normtext should be strict subset: norm=%d all=%d", len(norm), len(all))
+	if len(norm) != len(all) {
+		t.Fatalf("chunked and normtext should match: norm=%d chunked=%d", len(norm), len(all))
 	}
 	ids := map[string]bool{}
 	for _, u := range ir.Units {
@@ -201,10 +202,11 @@ func TestCrossFormatBoundariesFullFormats(t *testing.T) {
 		t.Fatal(err)
 	}
 	ids := UnitIDs(ir)
+	vectorIDs := vectorUnitIDs(ir)
 	chunks := EmitChunked(ir, domain.StandCitation{}, domain.FreshnessRecord{State: domain.FreshnessConfirmedCurrent})
 	flat := EmitFlat(ir)
-	if len(chunks) != len(ids) {
-		t.Fatalf("chunked/units boundary fail")
+	if len(chunks) != len(vectorIDs) {
+		t.Fatalf("chunked/vector boundary fail: chunks=%d vector=%d ir=%d", len(chunks), len(vectorIDs), len(ids))
 	}
 	for _, id := range ids {
 		if !strings.Contains(flat, id) {
@@ -245,11 +247,16 @@ func TestClassifyUnitHelpers(t *testing.T) {
 		{"bare abbrev", "ArbZG", "ArbZG", "", KindNoise},
 		{"textnachweis", "(+++ Textnachweis der Geltung +++)", "ArbZG", "", KindPreamble},
 		{"toc", "Inhaltsübersicht", "BGB", "", KindPreamble},
+		{"toc child under enbez", "Abschnitt 1 Allgemeine Vorschriften", "DEMO", "Inhaltsübersicht", KindPreamble},
+		{"toc verzeichnis ref", "§ 1 Zweck", "DEMO", "Inhaltsverzeichnis", KindPreamble},
 		{"norm", "Die werktägliche Arbeitszeit…", "ArbZG", "§ 2", KindNormtext},
+		{"real para 1", "Dieses Gesetz regelt den Zweck der Norm.", "DEMO", "§ 1", KindNormtext},
 		{"heading smash", "010Erster AbschnittAllgemeine Vorschriften", "ArbZG", "", KindSectionHeading},
 		{"footnote", "Fußnote 1: siehe Abs. 2", "ArbZG", "", KindFootnote},
 		{"bgbl under paragraph", "geändert durch BGBl. I S. 1", "ArbZG", "§ 1", KindNormtext},
 		{"bgbl orphan", "BGBl. I 1994 S. 1170", "ArbZG", "", KindPreamble},
+		{"eingangsformel", "Auf Grund des § 55 …", "VO", "Eingangsformel", KindNormtext},
+		{"eingangsformel bgbl", "Auf Grund des § 55 (BGBl. 2025 I Nr. 1) verordnet:", "VO", "Eingangsformel", KindNormtext},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

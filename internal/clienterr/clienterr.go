@@ -60,6 +60,7 @@ func isAllowed(msg string) bool {
 		"unknown tool ",
 		"method not found: ",
 		"operative bundle too large",
+		"index:",
 	} {
 		if strings.HasPrefix(msg, prefix) {
 			return true

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<dokument>
+  <norm>
+    <metadaten>
+      <jurabk>DEMO</jurabk>
+      <enbez>Inhaltsübersicht</enbez>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P>Abschnitt 1 Allgemeine Vorschriften</P>
+          <P>§ 1 Zweck</P>
+          <P>§ 2 Anwendungsbereich</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+
+  <norm>
+    <metadaten>
+      <jurabk>DEMO</jurabk>
+      <enbez>§ 1</enbez>
+      <titel format="parat">Zweck</titel>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P nr="1">Jeder hat Anspruch auf einen Mindestlohn von mindestens 12 Euro.</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+</dokument>

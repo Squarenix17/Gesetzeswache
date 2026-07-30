@@ -284,6 +284,64 @@ func TestBundle_HTTP_invalidJSON(t *testing.T) {
 	}
 }
 
+func TestIndex_HTTP_getAndPost(t *testing.T) {
+	srv, mt := testServer(t, "")
+	seedCatalogForHTTP(t, srv)
+	xmlBody := fixtures.MustRead("arbzg_snippet.xml")
+	mt.SetBytes("www.gesetze-im-internet.de", "/arbzg/xml.zip", fixtures.MustZipXML("arbzg.xml", xmlBody))
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/index?q=ArbZG&section=%C2%A7%201", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	var env service.Envelope
+	if err := json.NewDecoder(rec.Body).Decode(&env); err != nil {
+		t.Fatal(err)
+	}
+	if !env.Success {
+		t.Fatalf("envelope %+v", env)
+	}
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		// Data may be decoded as map from json.Raw - re-marshal path
+		raw, _ := json.Marshal(env.Data)
+		_ = json.Unmarshal(raw, &data)
+	}
+	body := `{"query":"ArbZG","section":"§ 1"}`
+	req = httptest.NewRequest(http.MethodPost, "/v1/index", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("post status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestIndex_HTTP_exportDisabled(t *testing.T) {
+	srv, _ := testServer(t, "")
+	seedCatalogForHTTP(t, srv)
+	srv.Svc.CFG.EnableExport = false
+	req := httptest.NewRequest(http.MethodGet, "/v1/index?q=ArbZG", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d", rec.Code)
+	}
+}
+
+func TestIndex_HTTP_invalidJSON(t *testing.T) {
+	srv, _ := testServer(t, "")
+	req := httptest.NewRequest(http.MethodPost, "/v1/index", strings.NewReader("{"))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d", rec.Code)
+	}
+}
+
 func TestFreshness_queryParamQ(t *testing.T) {
 	srv, _ := testServer(t, "")
 	seedCatalogForHTTP(t, srv)

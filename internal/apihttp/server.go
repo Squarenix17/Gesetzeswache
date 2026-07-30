@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Squarenix17/gesetzeswache/internal/clienterr"
+	"github.com/Squarenix17/gesetzeswache/internal/export"
 	"github.com/Squarenix17/gesetzeswache/internal/metrics"
 	"github.com/Squarenix17/gesetzeswache/internal/service"
 )
@@ -47,6 +48,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/sync/status", s.syncStatus)
 	mux.HandleFunc("/v1/export", s.export)
 	mux.HandleFunc("/v1/bundle", s.bundle)
+	mux.HandleFunc("/v1/index", s.index)
 	if s.Metrics == nil {
 		s.Metrics = metrics.NewRegistry()
 		metrics.RegisterDefaults(s.Metrics)
@@ -401,6 +403,58 @@ func (s *Server) bundle(w http.ResponseWriter, r *http.Request) {
 			s.write(w, 502, res, msg)
 		default:
 			s.logError(r.Context(), "bundle", err)
+			s.write(w, 502, res, clienterr.Internal)
+		}
+		return
+	}
+	s.write(w, 200, res, "")
+}
+
+func (s *Server) index(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	sectionRaw := r.URL.Query().Get("section")
+	includeValues := append([]string{}, r.URL.Query()["include"]...)
+	if q == "" && r.Body != nil && r.Body != http.NoBody {
+		var body struct {
+			Query   string `json:"query"`
+			Section string `json:"section"`
+			Include string `json:"include"`
+		}
+		if err := decodeJSON(w, r, &body); err != nil && err != io.EOF {
+			s.write(w, 400, nil, "invalid json body")
+			return
+		}
+		if q == "" {
+			q = body.Query
+		}
+		if sectionRaw == "" {
+			sectionRaw = body.Section
+		}
+		if body.Include != "" {
+			includeValues = append(includeValues, body.Include)
+		}
+	}
+	inc := service.MergeInclude(includeValues)
+	opts := service.IndexOpts{
+		Past:     inc.Past,
+		Sections: export.ParseSectionRefs(sectionRaw),
+	}
+	res, err := s.Svc.ExportIndexChunks(r.Context(), q, opts)
+	if err != nil {
+		msg := s.clientError(err)
+		switch {
+		case errors.Is(err, service.ErrQueryTooLong):
+			s.write(w, 400, nil, msg)
+		case msg == "export disabled", strings.HasPrefix(msg, "operative bundle too large"),
+			strings.HasPrefix(msg, "index:"):
+			s.write(w, 400, nil, msg)
+		case msg == "export refused: bundle member confirmed_stale", msg == "export refused: law confirmed_stale":
+			s.write(w, 502, res, msg)
+		case msg == clienterr.Internal:
+			s.logError(r.Context(), "index", err)
+			s.write(w, 502, res, msg)
+		default:
+			s.logError(r.Context(), "index", err)
 			s.write(w, 502, res, clienterr.Internal)
 		}
 		return

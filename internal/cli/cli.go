@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Squarenix17/gesetzeswache/internal/export"
 	"github.com/Squarenix17/gesetzeswache/internal/service"
 )
 
@@ -72,6 +73,14 @@ func Run(ctx context.Context, svc *service.Service, args []string) int {
 		}
 		res, err := svc.ExportOperativeBundle(ctx, q, formats, opts)
 		return printJSON(res, err)
+	case "index":
+		opts, rest := peelIndexFlags(args[1:])
+		if len(rest) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: index [--include=past] [--section=§1,§2] <query>")
+			return 2
+		}
+		res, err := svc.ExportIndexChunks(ctx, strings.Join(rest, " "), opts)
+		return printJSON(res, err)
 	default:
 		if args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 			PrintUsage()
@@ -108,6 +117,28 @@ func peelBundleFlags(args []string) (service.BundleOpts, []string) {
 		switch {
 		case a == "--compose":
 			opts.Compose = true
+		case strings.HasPrefix(a, "--include="):
+			part := service.ParseInclude(strings.TrimPrefix(a, "--include="))
+			opts.Past = opts.Past || part.Past
+		case a == "--include":
+			continue
+		default:
+			rest = append(rest, a)
+		}
+	}
+	return opts, rest
+}
+
+func peelIndexFlags(args []string) (service.IndexOpts, []string) {
+	var opts service.IndexOpts
+	var rest []string
+	for _, a := range args {
+		switch {
+		case strings.HasPrefix(a, "--section="):
+			refs := export.ParseSectionRefs(strings.TrimPrefix(a, "--section="))
+			opts.Sections = append(opts.Sections, refs...)
+		case a == "--section":
+			continue
 		case strings.HasPrefix(a, "--include="):
 			part := service.ParseInclude(strings.TrimPrefix(a, "--include="))
 			opts.Past = opts.Past || part.Past

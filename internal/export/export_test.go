@@ -17,15 +17,19 @@ func TestBuildAndFormatsSameUnits(t *testing.T) {
 		t.Fatalf("expected units, got %d amb=%v", len(ir.Units), ir.StructuralAmbiguity)
 	}
 	ids := UnitIDs(ir)
+	vectorIDs := vectorUnitIDs(ir)
 	h := EmitHierarchical(ir)
 	f := EmitFlat(ir)
 	chunks := EmitChunked(ir, domain.StandCitation{Raw: "x"}, domain.FreshnessRecord{State: domain.FreshnessConfirmedCurrent})
-	if len(chunks) != len(ids) {
-		t.Fatalf("chunk count %d != units %d", len(chunks), len(ids))
+	if len(chunks) != len(vectorIDs) {
+		t.Fatalf("chunk count %d != vector units %d (ir units %d)", len(chunks), len(vectorIDs), len(ids))
 	}
 	for i, c := range chunks {
-		if c.UnitID != ids[i] {
-			t.Fatalf("boundary mismatch at %d: %s vs %s", i, c.UnitID, ids[i])
+		if c.UnitID != vectorIDs[i] {
+			t.Fatalf("boundary mismatch at %d: %s vs %s", i, c.UnitID, vectorIDs[i])
+		}
+		if c.Kind != KindNormtext {
+			t.Fatalf("chunk %d kind=%s want normtext", i, c.Kind)
 		}
 		if c.Text == "" {
 			t.Fatal("empty text not allowed")
@@ -40,6 +44,16 @@ func TestBuildAndFormatsSameUnits(t *testing.T) {
 			t.Fatalf("flat missing id %s", id)
 		}
 	}
+}
+
+func vectorUnitIDs(ir IR) []string {
+	var ids []string
+	for _, u := range ir.Units {
+		if isVectorUnit(u) {
+			ids = append(ids, u.ID)
+		}
+	}
+	return ids
 }
 
 func contains(s, sub string) bool {

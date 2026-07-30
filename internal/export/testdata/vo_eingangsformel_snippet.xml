@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<dokument>
+  <norm>
+    <metadaten>
+      <jurabk>PBAV 2025</jurabk>
+      <enbez>Eingangsformel</enbez>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P>Auf Grund des § 55 Absatz 1 Satz 2 SGB XI, zuletzt geändert durch Artikel 1 des Gesetzes vom 1.1.2025 (BGBl. 2025 I Nr. 1), verordnet die Bundesregierung:</P>
+        </Content>
+      </text>
+      <fussnoten>
+        <Content>
+          <P>(+++ Textnachweis ab: 1.1.2025 +++)</P>
+        </Content>
+      </fussnoten>
+    </textdaten>
+  </norm>
+
+  <norm>
+    <metadaten>
+      <jurabk>PBAV 2025</jurabk>
+      <enbez>§ 1</enbez>
+      <titel format="parat">Anwendungsbereich</titel>
+    </metadaten>
+    <textdaten>
+      <text>
+        <Content>
+          <P nr="1">Der Beitragssatz wird auf 3,6 Prozent festgesetzt.</P>
+        </Content>
+      </text>
+    </textdaten>
+  </norm>
+</dokument>

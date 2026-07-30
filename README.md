@@ -1,4 +1,15 @@
+<!-- Improved compatibility of back to top link: See: https://github.com/othneildrew/Best-README-Template/pull/73 -->
 <a id="readme-top"></a>
+
+<!-- PROJECT SHIELDS -->
+[![Contributors][contributors-shield]][contributors-url]
+[![Forks][forks-shield]][forks-url]
+[![Stargazers][stars-shield]][stars-url]
+[![Issues][issues-shield]][issues-url]
+[![License][license-shield]][license-url]
+[![Go][go-shield]][go-url]
+
+<!-- PROJECT LOGO / TITLE -->
 <br />
 <div align="center">
 
@@ -36,7 +47,6 @@
         <li><a href="#docker">Docker</a></li>
       </ul>
     </li>
-    <li><a href="#roadmap">Roadmap</a></li>
     <li><a href="#license">License</a></li>
     <li><a href="#contact">Contact</a></li>
   </ol>
@@ -45,141 +55,185 @@
 <!-- ABOUT THE PROJECT -->
 ## About The Project
 
-**gesetzeswache** (`gew`) is a single Go binary that resolves German federal laws by abbreviation, title, or informal variant, and attaches **BGBl freshness metadata** before returning results. It verifies against official sources (Gesetze im Internet, BGBl feeds, ELI) on a schedule and on demand.
+**gesetzeswache** (`gew`) is a single Go binary that finds German federal laws by abbreviation, title, or informal name, and attaches **freshness metadata** from official sources before returning a result.
 
-**Verify-before-serve:** matched resolve and export responses attach freshness metadata. Consumers must honor it.
+Typical use: a RAG pipeline, chatbot, or internal tool needs to know *which* law a user meant (e.g. `MiLoG`, `Mindestlohngesetz`, `BGB`) and whether that text is still safe to treat as current.
 
-### What it is
+It syncs a lightweight catalog from [Gesetze im Internet](https://www.gesetze-im-internet.de/) (GII) and Bundesgesetzblatt (BGBl) feeds, then exposes three interfaces:
 
-- **Interfaces:** HTTP REST, local CLI (`gew`), MCP over stdio
-- **Optional text export:** on-demand `hierarchical`, `chunked`, `flat`, or `normtext` formats for RAG and indexing pipelines, no durable full-text corpus is stored. Vector formats (`chunked`, `normtext`) omit `Inhaltsübersicht` / table-of-contents chrome and other editorial preamble (`+++` markers); `flat` retains the full IR.
-- **Env prefix:** `GEW_*` (matches the `gew` binary nickname)
+| Interface | When to use it |
+|-----------|----------------|
+| **REST** (`gew serve`) | HTTP clients, Docker, production services |
+| **CLI** (`gew …`) | Scripts, local debugging, one-off exports |
+| **MCP** (`gew mcp`) | AI agents over stdio JSON-RPC |
+
+### What it does
+
+- Resolves a query to a canonical law id (e.g. `milog`) with optional suggestions on weak matches
+- Attaches **fail-closed freshness** (`confirmed_current` / `confirmed_stale` / `uncertain`)
+- On demand, exports statute text in several formats (no full-text corpus is stored permanently)
+- For amendment-by-reference laws (e.g. MiLoG + Mindestlohn-Verordnung), can return **parent + current linked ordinances** in one call (`bundle` / `index`)
 
 ### What it is not
 
-- **Not an LLM:** no language model, embeddings, or chat layer
-- **Not a statute mirror:** lightweight catalog and sync state (embedded bbolt), not a permanent copy of all law full text
-- **Not legal advice:** helps locate and verify official statute references; interpretation is out of scope
+- **Not an LLM** — no chat, embeddings, or answer generation
+- **Not a full statute archive** — text is fetched on demand from GII; only catalog + sync state live in a local bbolt DB
+- **Not legal advice** — it helps locate and check references; interpretation is your responsibility
 
-### Current Verification Status
+### Important limitations (read before integrating)
 
-Fail-closed freshness verification is **implemented**:
+These are intentional or known behaviours — they are easy to misread as bugs:
 
-- **GII feed success** gates `confirmed_current` (no confirmation without successful feed evidence)
-- **BGBl/ELI probe clock** unified: probe-only evidence never confirms; falls through to `uncertain`
-- **Sync/store/write/read failures** fail closed → `uncertain`
-- **Future/clock-jump timestamps** rejected (±5 min future tolerance; no backwards stamp moves)
-- **Partial BGBl feed failure** sets a self-healing degraded marker until the next full success
-- **Golden regression tests** pin happy-path resolve/freshness outputs
-- **CI** runs blocking `govulncheck`, `gosec`, `staticcheck`, race detector, and per-package coverage floors (`service`/`apihttp`/`sync`/`store` ≥80%)
-
-**Not yet:**
-
-- Per-law sync evidence timestamps on `/v1/sync/status` (roadmap)
+1. **`uncertain` is normal for some laws.** Parents with linked ordinances (e.g. MiLoG) often stay `uncertain` until ordinance citations are verified. That is fail-closed behaviour, not a failed lookup. Sync can still be healthy while a law is `uncertain`.
+2. **Freshness is a contract, not decoration.** Do not index or serve text as “current” unless freshness (or for bundles, `bundle_freshness.safe_to_serve`) allows it.
+3. **Linked Verordnungen are not the same as parent §§.** MiLoV5 § 2 is not MiLoG § 2. Use `section_hint` / `parent_section_hint` as attachment metadata, not as a 1:1 section map.
+4. **CLI and `serve` share one database file.** Do not run both at once against the same `gesetzeswache.db` (lock / timeout errors).
+5. **First sync needs network and time.** Until `/readyz` reports ready, resolve/export may be incomplete. Outbound HTTPS to GII and `recht.bund.de` is required.
+6. **Auto-discovery of linked instruments is best-effort.** High-confidence Ermächtigung links are stored automatically; seeded TSV overrides win on collision. Coverage is incomplete for the full federal corpus.
+7. **HTTP is open by design for trusted networks.** Only `POST /v1/recheck` is authenticated. Do not expose the API on the public internet without TLS, network controls, and rate limits — see [`SECURITY.md`](SECURITY.md).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 <!-- USAGE -->
 ## Usage
 
-### Consumer contract
-
-REST and CLI wrap payloads in a JSON envelope:
+All JSON responses use the same envelope:
 
 ```json
 { "success": true, "data": { }, "error": null }
 ```
 
-Any client: RAG pipeline, search index, agent tool, or application, must treat freshness as part of the API contract:
+### Freshness (consumer contract)
 
-1. **Always read freshness on matched results**, resolve/export: `data.freshness.state`; `GET /v1/freshness`: `data.state`; bundle: `data.bundle_freshness` and per-member freshness
-2. **Embed or serve as current only when** state is `confirmed_current`, confidence is high, and Stand `parse_ok` is true (amendment-by-reference laws may otherwise look current while a linked Verordnung moved). For bundles, serve as current only when `bundle_freshness.safe_to_serve` is true (fail-closed over all members).
-3. **Quarantine or flag for manual review** when state is `confirmed_stale` or `uncertain`
-4. **Never index or serve law text while ignoring freshness metadata**. For amendment-by-reference parents, index `parent.formats` and `operative[].formats` as **separate** chunks linked by `operative[].link.section_hint` — do not embed optional composed hierarchical. Vector formats (`normtext`, `chunked`) omit Inhaltsübersicht and editorial `(+++ … +++ )` markers; operative `§` text is kept.
+| State | Meaning | What you should do |
+|-------|---------|-------------------|
+| `confirmed_current` | Verified against BGBl/GII signals | Safe to treat as current (also check confidence + Stand `parse_ok`) |
+| `confirmed_stale` | A newer publication is known | Quarantine / manual review |
+| `uncertain` | Evidence missing or conflicting | Quarantine / manual review — **do not** treat as proven current |
 
-BGBl issue identity is always the triple `(teil, year, number)`, never compare issue number alone.
+Rules of thumb:
 
-| State | Meaning | Consumer action |
-|-------|---------|-----------------|
-| `confirmed_current` | Verified current against BGBl/GII signals | Safe to treat as current |
-| `confirmed_stale` | Known newer publication | Quarantine / manual review |
-| `uncertain` | Insufficient or conflicting signals | Quarantine / manual review |
+1. Always read freshness on matched results (`data.freshness.state`, or for bundles/index: `data.bundle_freshness`).
+2. For bundles/index, serve as current only when `bundle_freshness.safe_to_serve` is `true` (fail-closed over **all** members).
+3. For vector ingest of amendment-by-reference parents, index **parent and linked ordinances as separate chunks** linked by `parent_section_hint` — do not embed optional `--compose` hierarchical text.
+4. BGBl issue identity is the triple `(teil, year, number)` — never compare issue numbers alone.
 
-**Note on `uncertain`:** Finding the right law is not the same as proving it is fully current. Parents that point at linked ordinances (e.g. MiLoG → Mindestlohn-Verordnung) stay `uncertain` until those ordinance citations are verified. That is intentional fail-closed behaviour, not a failed lookup. Sync can still be healthy (`data_fresh: true`) while a law is `uncertain`.
+Optional: `GEW_REFUSE_EXPORT_STALE=true` makes the server refuse export when a law is `confirmed_stale`.
 
-Optional: set `GEW_REFUSE_EXPORT_STALE=true` so the server rejects export for `confirmed_stale` laws.
+### Which command / endpoint for which job?
 
-Amendment-by-reference parents (e.g. MiLoG, SGB XI § 55) expose `freshness.linked_instruments`: **section-scoped** ordinances with Inkrafttreten (`effective_from`), `section_hint`, and `status` (`current`/`future` by default; superseded `past` only with `include=past`). They are not full-law replacements — use `gew bundle` / `GET /v1/bundle` for parent + current linked Verordnungen in one call (unmixed formats), or export the child slug alone (e.g. `milov5`, `pbav_2025`).
+| Goal | CLI | REST |
+|------|-----|------|
+| Find a law + freshness | `gew resolve MiLoG` | `GET /v1/resolve?q=MiLoG` |
+| Freshness only | `gew freshness milog` | `GET /v1/freshness?id=milog` |
+| Full readable text | `gew export MiLoG hierarchical` | `GET /v1/export?q=MiLoG&format=hierarchical` |
+| Parent + linked VO (unmixed, for display/API) | `gew bundle MiLoG normtext` | `GET /v1/bundle?q=MiLoG&format=normtext` |
+| Combined markdown for humans | `gew bundle --compose MiLoG hierarchical` | `…/v1/bundle?…&compose=true` |
+| Flat chunks for a vector DB | `gew index MiLoG` | `GET /v1/index?q=MiLoG` |
+| Only one parent section + matching VO | `gew index MiLoG --section='§ 1'` | `…/v1/index?q=MiLoG&section=%C2%A7%201` |
 
-**Automatic discovery (Phase 4.8):** when a Verordnung is ingested (GII feed / TOC / capped discovery / export), its Ermächtigung is parsed and high-confidence parent→child links are stored automatically (`source=discovered`). Bundle Verordnungen that authorize multiple parent books (e.g. SVBezGrV → SGB IV/V/VI) link **each uniquely resolved parent**. Manual [`variants/linked_instruments.tsv`](variants/linked_instruments.tsv) remains an **override** (wins on collision), not the primary update channel. Fortschreibung / yearly-ordinance families (e.g. SGB II → current `rbsfv_*`, SGB VI → current `bsv_*` / `rvbeitrsbek_*`) attach via [`variants/fortschreibung_families.tsv`](variants/fortschreibung_families.tsv) (`source=seeded`, latest catalog year; same-prefix discovered years suppressed). Config: `GEW_DISCOVERY_ENABLED` (default true), `GEW_DISCOVERY_MAX_PER_CYCLE` (default 50), `GEW_FORTSCHREIBUNG_FAMILIES_PATH`.
+### Export formats
 
-### REST
+| Format | Shape | Best for |
+|--------|-------|----------|
+| `hierarchical` | Markdown-like sections | Reading / display |
+| `chunked` / `normtext` | One payload per Abs./unit | RAG / embeddings (TOC and editorial `(+++ … +++ )` omitted) |
+| `flat` | Full IR with markers | Diffing / debugging (includes chrome that vector formats drop) |
+
+**`index`** is a dedicated ingest projection: flat `chunks[]` with `law_id`, `law_name`, `instrument_kind`, `section_ref`, `section_name`, and on linked ordinances only `parent_law_id` / `parent_section_hint`. Formulary chrome such as `Eingangsformel` is omitted from index output.
+
+### REST API
+
+Default listen address: `:8080` (Compose maps host **8081** → container 8080 — see [Docker](#docker)).
 
 | Method | Path | Notes |
 |--------|------|-------|
 | GET | `/healthz` | Liveness |
-| GET | `/readyz` | Readiness (sync initialized) |
-| GET | `/metrics` | Prometheus text metrics (unauthenticated) |
-| GET, POST | `/v1/resolve?q=` | Resolve law + freshness (`include=past`, `include=linked` optional) |
-| GET | `/v1/freshness?id=` | Freshness for a known ID (or `q=`; same `include`) |
+| GET | `/readyz` | Readiness (catalog / sync initialized) |
+| GET | `/metrics` | Prometheus text (unauthenticated) |
+| GET, POST | `/v1/resolve?q=` | Resolve + freshness (`include=past`, `include=linked`) |
+| GET | `/v1/freshness?id=` | Freshness by id or `q=` |
 | GET | `/v1/stale` | List `confirmed_stale` laws |
-| GET | `/v1/sync/status` | Sync and readiness status |
-| GET, POST | `/v1/export?q=&format=hierarchical\|chunked\|flat\|normtext` | On-demand text export (same `include`) |
-| GET, POST | `/v1/bundle?q=&format=` | Parent + current linked Verordnungen (`include=past`, `compose=true` optional) |
-| GET, POST | `/v1/index?q=` | Flat ingest-ready chunks (`section=§1,§2`, `include=past` optional) |
-| POST | `/v1/recheck` | Force re-verification (auth required) |
+| GET | `/v1/sync/status` | Sync and readiness timestamps |
+| GET, POST | `/v1/export?q=&format=` | `hierarchical` \| `chunked` \| `flat` \| `normtext` |
+| GET, POST | `/v1/bundle?q=&format=` | Parent + current linked Verordnungen (`include=past`, `compose=true`) |
+| GET, POST | `/v1/index?q=` | Flat ingest chunks (`section=§1,§2`, `include=past`) |
+| POST | `/v1/recheck` | Force re-verification (**auth required**) |
 
 ```bash
-curl 'http://127.0.0.1:8080/v1/resolve?q=BGB'
-curl 'http://127.0.0.1:8080/v1/resolve?q=MiLoG&include=linked'
-curl 'http://127.0.0.1:8080/v1/export?q=BGB&format=hierarchical'
-curl 'http://127.0.0.1:8080/v1/bundle?q=MiLoG&format=normtext'
-curl 'http://127.0.0.1:8080/v1/index?q=MiLoG'
-curl 'http://127.0.0.1:8080/v1/sync/status'
-curl -s 'http://127.0.0.1:8080/metrics' | head
+# Replace 8080 with 8081 if using the default docker-compose.yml mapping
+curl -s 'http://127.0.0.1:8080/healthz'
+curl -s 'http://127.0.0.1:8080/readyz'
+curl -s 'http://127.0.0.1:8080/v1/resolve?q=BGB' | jq .
+curl -s 'http://127.0.0.1:8080/v1/resolve?q=MiLoG&include=linked' | jq .
+curl -s 'http://127.0.0.1:8080/v1/export?q=MiLoG&format=hierarchical' | jq -r '.data.formats.hierarchical' | head
+curl -s 'http://127.0.0.1:8080/v1/bundle?q=MiLoG&format=hierarchical&compose=true' | jq -r '.data.formats.hierarchical' | head
+curl -s 'http://127.0.0.1:8080/v1/index?q=MiLoG' | jq '.data.chunks[0]'
+curl -s 'http://127.0.0.1:8080/v1/sync/status' | jq .
 ```
 
 ### CLI
 
+From the repo root after build (`./bin/gew`) or with `bin` on your `PATH`:
+
 ```bash
-gew serve                    # HTTP API + background sync
-gew resolve BGB              # Resolve law + freshness
-gew resolve --include=past MiLoG
-gew freshness bgb            # Freshness only
-gew stale                    # List confirmed_stale laws
-gew recheck bgb              # Force re-verification
-gew sync-status              # Sync readiness
-gew export BGB hierarchical  # On-demand text export
-gew bundle MiLoG normtext    # Parent + current linked Verordnungen
-gew index MiLoG              # Flat chunks for vector ingest
-gew mcp                      # MCP stdio server
+gew serve                         # HTTP API + background sync
+gew resolve BGB                   # Resolve law + freshness
+gew resolve --include=linked MiLoG
+gew freshness bgb
+gew stale
+gew recheck bgb                   # Local process call (no HTTP token)
+gew sync-status
+gew export BGB hierarchical
+gew bundle MiLoG normtext
+gew bundle --compose MiLoG hierarchical
+gew index MiLoG
+gew index MiLoG --section='§ 1'
+gew index --include=past MiLoG --section='§ 1,§ 2'
+gew mcp                           # MCP stdio server
+gew health                        # Probe /healthz (container HEALTHCHECK)
+gew version
 ```
+
+`gew help` prints the same command list with examples.
 
 ### MCP (stdio)
 
-Run `gew mcp` and connect your MCP client.
+Run `gew mcp` and connect your MCP client (stdio JSON-RPC).
 
 | Tool | Purpose |
 |------|---------|
 | `resolve_law` | Resolve by abbreviation/title + freshness |
 | `export_law_text` | Export text (`hierarchical`, `chunked`, `flat`, `normtext`) |
-| `export_law_bundle` | Parent + current linked Verordnungen (unmixed; optional `compose`) |
-| `law_freshness` | Freshness for a known law ID or abbreviation |
-| `list_stale_laws` | List laws currently `confirmed_stale` |
-| `force_recheck` | Force out-of-band re-verification |
-| `sync_status` | Sync and freshness readiness |
+| `export_law_bundle` | Parent + current linked Verordnungen (optional `compose`) |
+| `law_freshness` | Freshness for a known id or abbreviation |
+| `list_stale_laws` | List `confirmed_stale` laws |
+| `force_recheck` | Force re-verification (in-process; no HTTP token) |
+| `sync_status` | Sync and readiness |
 
-### Authentication (recheck)
+There is **no** MCP tool for `/v1/index` yet — use CLI or REST for vector ingest.
 
-`POST /v1/recheck` is **fail-closed**: set `GEW_SHARED_SECRET` and send the same value in the `X-Gesetzeswache-Token` header. Empty secret or wrong header → `401`.
+### Authentication (recheck only)
 
-CLI `recheck` and MCP `force_recheck` call the local process directly (no HTTP token); protect process access in production.
+`POST /v1/recheck` is fail-closed:
 
-### Variants
+- Set `GEW_SHARED_SECRET` to a long random value
+- Send the same value in the `X-Gesetzeswache-Token` header
+- Empty secret or wrong header → `401`
 
-Informal names (e.g. `Zivilgesetzbuch` → `bgb`) live in [`variants/variants.tsv`](variants/variants.tsv) as TSV: `variant<TAB>law_id`. Override with `GEW_VARIANTS_PATH`.
+CLI `recheck` and MCP `force_recheck` talk to the local process directly (no HTTP token). Protect process access in production.
 
-Linked ordinances (amendment-by-reference) live in [`variants/linked_instruments.tsv`](variants/linked_instruments.tsv); override with `GEW_LINKED_INSTRUMENTS_PATH`. Fortschreibung family consumers → slug prefix: [`variants/fortschreibung_families.tsv`](variants/fortschreibung_families.tsv).
+### Linked instruments and variants
+
+Some statutes (e.g. MiLoG) do not carry every operative rate in the Gesetz text itself; a linked Verordnung does. Those links appear under `freshness.linked_instruments` when you use `include=linked`, or as separate members via `bundle` / `index`.
+
+| File | Role |
+|------|------|
+| [`variants/variants.tsv`](variants/variants.tsv) | Informal names → law id (e.g. `Zivilgesetzbuch` → `bgb`) |
+| [`variants/linked_instruments.tsv`](variants/linked_instruments.tsv) | Manual parent → Verordnung overrides (wins on collision) |
+| [`variants/fortschreibung_families.tsv`](variants/fortschreibung_families.tsv) | Yearly Fortschreibung families (latest catalog year) |
+
+When discovery is enabled (`GEW_DISCOVERY_ENABLED=true`), high-confidence parent→child links can also be stored from Verordnung Ermächtigung text (`source=discovered`). Treat discovery as helpful coverage, not a complete legal graph.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -188,106 +242,98 @@ Linked ordinances (amendment-by-reference) live in [`variants/linked_instruments
 
 ### Prerequisites
 
-- **Go 1.26+:** to build from source
-- **Docker:** (optional) to run the published container image
-- **Network:** outbound HTTPS to GII and `recht.bund.de` for sync and export
+- **Go 1.26+** to build from source
+- **Docker** (optional) for the container image / Compose
+- **Network** — outbound HTTPS to GII and `recht.bund.de` for sync and export
+- **`jq`** (optional) — handy for inspecting JSON from curl/CLI
 
 ### Installation
 
-1. Clone the repo
+1. Clone the repository
    ```sh
    git clone https://github.com/Squarenix17/gesetzeswache.git
    cd gesetzeswache
    ```
+
 2. Build the binary
    ```sh
    go build -o bin/gew ./cmd/gesetzeswache
    ```
-   Or download a release binary into `bin/` ([releases](https://github.com/Squarenix17/Gesetzeswache/releases)): `gew_linux_amd64` → `bin/gew`, then `chmod +x bin/gew`.
+   Or download a release asset into `bin/` from [Releases](https://github.com/Squarenix17/gesetzeswache/releases) (e.g. `gew_linux_amd64` → `bin/gew`), then `chmod +x bin/gew`.
 
-   Run with `./bin/gew …` from the repo root, **or** put `bin` on your `PATH` so `gew` works without the prefix:
+3. Put `bin` on your `PATH` (optional)
    ```sh
-   export PATH="$(pwd)/bin:$PATH"   # this shell only
-   # optional permanent: ln -sf "$(pwd)/bin/gew" ~/.local/bin/gew
+   export PATH="$(pwd)/bin:$PATH"
    ```
-   CLI and `serve` both use `gesetzeswache.db` — run **one at a time** (not both).
 
-3. Run the server
+4. Start the server **or** use CLI commands (not both against the same DB at once)
    ```sh
    ./bin/gew serve
    ```
-4. Check health
+
+5. Wait for readiness, then probe
    ```sh
    curl http://127.0.0.1:8080/healthz
    curl http://127.0.0.1:8080/readyz
    ```
 
-The server listens on `:8080` by default.
+The first sync can take one to several minutes depending on network and discovery settings.
 
 ### Configuration
 
-All settings use the `GEW_` environment prefix. Essential variables:
+All settings use the `GEW_` prefix. Copy [`.env.example`](.env.example) as a starting point.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GEW_HTTP_ADDR` | `:8080` | HTTP listen address |
 | `GEW_STORE_PATH` | `gesetzeswache.db` | Embedded bbolt catalog and sync state |
 | `GEW_MATCH_THRESHOLD` | `0.75` | Fuzzy match threshold (0–1) |
-| `GEW_FRESHNESS_MAX_AGE` | `6h` | Max age before sync data is too stale to confirm current |
-| `GEW_SHARED_SECRET` | *(empty)* | Required for HTTP recheck; empty = fail-closed (401) |
-| `GEW_VARIANTS_PATH` | `variants/variants.tsv` | TSV of informal names → law IDs |
-| `GEW_ENABLE_EXPORT` | `true` | Enable on-demand text export |
-| `GEW_REFUSE_EXPORT_STALE` | `false` | When `true`, refuse export if law is `confirmed_stale` |
-| `GEW_DISCOVERY_ENABLED` | `true` | Auto-discover parent→Verordnung links from Ermächtigung |
-| `GEW_DISCOVERY_MAX_PER_CYCLE` | `50` | Max Verordnungen to ingest per discovery pass |
-| `GEW_FORTSCHREIBUNG_FAMILIES_PATH` | `variants/fortschreibung_families.tsv` | Consumer→Fortschreibung slug-prefix families |
+| `GEW_FRESHNESS_MAX_AGE` | `6h` | Max age of sync evidence before confirmation fails |
+| `GEW_SHARED_SECRET` | *(empty)* | Required for HTTP recheck; empty → fail-closed `401` |
+| `GEW_VARIANTS_PATH` | `variants/variants.tsv` | Informal name → law id |
+| `GEW_LINKED_INSTRUMENTS_PATH` | `variants/linked_instruments.tsv` | Seeded parent→VO links |
+| `GEW_ENABLE_EXPORT` | `true` | Enable on-demand text export / bundle / index |
+| `GEW_REFUSE_EXPORT_STALE` | `false` | Refuse export when law is `confirmed_stale` |
+| `GEW_DISCOVERY_ENABLED` | `true` | Auto-discover parent→Verordnung links |
+| `GEW_DISCOVERY_MAX_PER_CYCLE` | `50` | Max Verordnungen ingested per discovery pass |
+| `GEW_FORTSCHREIBUNG_FAMILIES_PATH` | `variants/fortschreibung_families.tsv` | Fortschreibung slug-prefix families |
 
-Additional sync intervals, source URLs, and tuning knobs: [`.env.example`](.env.example) and [`internal/config/config.go`](internal/config/config.go).
+More sync intervals and source URLs: [`.env.example`](.env.example), [`internal/config/config.go`](internal/config/config.go).
 
 ### Docker
 
-Image: `ghcr.io/squarenix17/gesetzeswache:latest` (pinned tags on [releases](https://github.com/Squarenix17/gesetzeswache/releases))
+Published image: `ghcr.io/squarenix17/gesetzeswache:latest` (pinned tags on [releases](https://github.com/Squarenix17/gesetzeswache/releases)).
 
-The image ships a `HEALTHCHECK` via `gew health`; Kubernetes liveness/readiness probes can keep using `/healthz` and `/readyz`.
+The image includes a `HEALTHCHECK` via `gew health`. Kubernetes can keep using `/healthz` and `/readyz`.
+
+**Compose** (from the repo; `GEW_SHARED_SECRET` is required):
 
 ```bash
 export GEW_SHARED_SECRET="$(openssl rand -hex 32)"
-docker compose up -d
-curl http://127.0.0.1:8080/readyz
+# Persist the secret so restarts keep the same value:
+#   echo "GEW_SHARED_SECRET=$GEW_SHARED_SECRET" > .env
+
+docker compose up -d --build
+curl http://127.0.0.1:8081/readyz
 ```
 
-`GEW_SHARED_SECRET` is required for Compose (no default). Host port **8080** maps to the container.
-
-Stop:
+The checked-in [`docker-compose.yml`](docker-compose.yml) maps **host `8081` → container `8080`** so it does not collide with another service already on 8080. Adjust the left-hand port if needed.
 
 ```bash
+docker compose logs -f gew
 docker compose down
 ```
 
-Override other `GEW_*` in [`docker-compose.yml`](docker-compose.yml) under `environment:`, or run manually:
+**One-off run:**
 
 ```bash
-docker run --rm -p 8080:8080 -e GEW_SHARED_SECRET="$(openssl rand -hex 32)" -v gew-data:/tmp ghcr.io/squarenix17/gesetzeswache:latest
+docker run --rm -p 8081:8080 \
+  -e GEW_SHARED_SECRET="$(openssl rand -hex 32)" \
+  -v gew-data:/tmp \
+  ghcr.io/squarenix17/gesetzeswache:latest
 ```
 
-See [`.env.example`](.env.example) for the full variable list and [`SECURITY.md`](SECURITY.md) for reporting vulnerabilities.
-
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
-
-<!-- ROADMAP -->
-## Roadmap
-
-- [x] Core resolve + BGBl freshness evaluator
-- [x] REST, CLI (`gew`), and MCP interfaces
-- [x] On-demand text export (hierarchical / chunked / flat)
-- [x] Docker image + GHCR publish
-- [x] Export format quality (`kind` / `section_ref` / `normtext` for RAG)
-- [x] Integration tests with mocked GII/BGBl fixtures
-- [x] Bulk Stand refresh for full catalog
-- [x] Metrics / observability endpoints
-- [x] Section-scoped linked instruments (Inkrafttreten status; `include=past` / `include=linked`)
-
-See the [open issues](https://github.com/Squarenix17/gesetzeswache/issues) for proposed features and known issues.
+For vulnerability reporting and deployment hardening, see [`SECURITY.md`](SECURITY.md).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -301,7 +347,8 @@ Distributed under the MIT License. See [`LICENSE`](LICENSE) for more information
 <!-- CONTACT -->
 ## Contact
 
-Gabriele Ughetto · Telegram [@Squarenix](https://t.me/squarenix)  
+Gabriele Ughetto · Telegram [@Squarenix](https://t.me/squarenix)
+
 Issues: [github.com/Squarenix17/gesetzeswache/issues](https://github.com/Squarenix17/gesetzeswache/issues)
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
@@ -317,5 +364,5 @@ Issues: [github.com/Squarenix17/gesetzeswache/issues](https://github.com/Squaren
 [issues-url]: https://github.com/Squarenix17/gesetzeswache/issues
 [license-shield]: https://img.shields.io/github/license/Squarenix17/gesetzeswache.svg?style=for-the-badge
 [license-url]: https://github.com/Squarenix17/gesetzeswache/blob/main/LICENSE
-[go-shield]: https://img.shields.io/badge/Go-1.21-00ADD8?style=for-the-badge&logo=go&logoColor=white
+[go-shield]: https://img.shields.io/badge/Go-1.26-00ADD8?style=for-the-badge&logo=go&logoColor=white
 [go-url]: https://go.dev/

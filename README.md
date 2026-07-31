@@ -27,7 +27,12 @@
   <summary>Table of Contents</summary>
   <ol>
     <li><a href="#about-the-project">About The Project</a></li>
-    <li><a href="#usage">Usage</a></li>
+    <li>
+      <a href="#usage">Usage</a>
+      <ul>
+        <li><a href="#improve-attached-retrieval">Improve attached retrieval</a></li>
+      </ul>
+    </li>
     <li>
       <a href="#getting-started">Getting Started</a>
       <ul>
@@ -224,6 +229,35 @@ Some statutes (e.g. MiLoG) do not carry every operative rate in the Gesetz text 
 | [`variants/fortschreibung_families.tsv`](variants/fortschreibung_families.tsv) | Yearly Fortschreibung families (latest catalog year) |
 
 When discovery is enabled (`GEW_DISCOVERY_ENABLED=true`), high-confidence parent→child links can also be stored from Verordnung Ermächtigung text (`source=discovered`). Treat discovery as helpful coverage, not a complete legal graph.
+
+### Improve attached retrieval
+
+When a parent resolves but linked Verordnungen are missing, incomplete, or keep the law `uncertain`, extend coverage like this:
+
+1. **Check what is attached today**
+   ```bash
+   gew resolve --include=linked MiLoG
+   gew freshness --include=linked,proof milog
+   gew index MiLoG | jq '.data.bundle_freshness'
+   ```
+2. **Seed a known parent→VO link** in [`variants/linked_instruments.tsv`](variants/linked_instruments.tsv):
+   ```text
+   parent_law_id<TAB>kind<TAB>gii_slug<TAB>notes[<TAB>effective_from<TAB>section_hint]
+   ```
+   - `notes` must include a parseable BGBl citation (e.g. `BGBl 2025 I Nr. 268`).
+   - Prefer `effective_from` (`YYYY-MM-DD`) + `section_hint` (e.g. `§ 1`) when rates are section-scoped.
+   - If a parent has **two or more** rows, every row needs both `effective_from` and `section_hint`.
+   - Seeded TSV rows override discovered links for the same parent+slug.
+3. **Add informal aliases** in [`variants/variants.tsv`](variants/variants.tsv) (`variant<TAB>law_id`) so resolve hits the right catalog id.
+4. **Yearly Fortschreibung families** (Regelbedarf, Beitragssätze, …): add a row to [`variants/fortschreibung_families.tsv`](variants/fortschreibung_families.tsv) so the latest catalog year for that slug prefix is attached automatically.
+5. **Let discovery help, then recheck**
+   ```bash
+   # GEW_DISCOVERY_ENABLED=true (default)
+   gew recheck milog
+   ```
+6. **Re-ingest only when safe** — index parent and linked VO as separate chunks; serve as current only when `bundle_freshness.safe_to_serve` is `true`.
+
+Formats and edge cases: [`variants/README.md`](variants/README.md).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 

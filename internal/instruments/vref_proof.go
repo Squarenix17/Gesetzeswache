@@ -47,6 +47,89 @@ func ApplyChildFreshnessProof(
 	return out
 }
 
+// MarkSupersededPastKindV marks unmatched past-only Kind V refs Historical when a same-section
+// current sibling is already Resolved and ChildConfirmed.
+func MarkSupersededPastKindV(
+	resolutions []domain.VRefResolution,
+	annotated []domain.LinkedInstrument,
+	childStands map[string]domain.StandCitation,
+) []domain.VRefResolution {
+	if len(resolutions) == 0 {
+		return []domain.VRefResolution{}
+	}
+	out := make([]domain.VRefResolution, len(resolutions))
+	copy(out, resolutions)
+
+	confirmedSlugs := make(map[string]struct{})
+	for _, res := range out {
+		if res.Resolved && res.ChildConfirmed && res.MatchedGIISlug != "" {
+			confirmedSlugs[res.MatchedGIISlug] = struct{}{}
+		}
+	}
+
+	var past, current []domain.LinkedInstrument
+	for _, li := range annotated {
+		switch li.Status {
+		case StatusPast:
+			past = append(past, li)
+		case StatusCurrent, "":
+			// Empty status: same as ResolveOperativeVRefs — discovery edges without EffectiveFrom.
+			current = append(current, li)
+		}
+	}
+
+	for i := range out {
+		res := &out[i]
+		if res.Historical {
+			continue
+		}
+		if res.Resolved && res.ChildConfirmed {
+			continue
+		}
+		if res.MatchedGIISlug != "" {
+			continue
+		}
+		if !isKindV(res.Ref) {
+			continue
+		}
+
+		pastMatches := matchChildrenByIdentity(res.Ref, past, childStands)
+		if len(pastMatches) == 0 {
+			continue
+		}
+
+		sectionNorm := normalizeSectionHint(res.Ref.SectionHint)
+		if sectionNorm == "*" {
+			// Fail closed if past matches disagree on section — do not pick arbitrarily.
+			pastSection := normalizeSectionHint(pastMatches[0].SectionHint)
+			for _, pm := range pastMatches[1:] {
+				if normalizeSectionHint(pm.SectionHint) != pastSection {
+					pastSection = "*"
+					break
+				}
+			}
+			sectionNorm = pastSection
+		}
+		if sectionNorm == "*" {
+			continue
+		}
+
+		for _, child := range current {
+			if normalizeSectionHint(child.SectionHint) != sectionNorm {
+				continue
+			}
+			if _, ok := confirmedSlugs[child.GIISlug]; !ok {
+				continue
+			}
+			res.Historical = true
+			res.MatchMethod = "superseded_past_v"
+			res.SupersededBy = child.GIISlug
+			break
+		}
+	}
+	return out
+}
+
 // EvaluateLeafChildFreshness evaluates a matched child as a leaf (no V-ref recursion).
 func EvaluateLeafChildFreshness(
 	st MetaStandIssueStore,
@@ -96,7 +179,8 @@ func EvaluateLeafChildFreshness(
 	return rec.State
 }
 
-// ProveVRefResolutions resolves operative refs and applies Proof C child gate.
+// ProveVRefResolutions resolves operative refs, applies Proof C child gate, then
+// supersedes past-only Kind V when a same-section current sibling is confirmed.
 func ProveVRefResolutions(
 	refs []domain.InstrumentRef,
 	annotated []domain.LinkedInstrument,
@@ -108,7 +192,8 @@ func ProveVRefResolutions(
 ) []domain.VRefResolution {
 	childStands := BuildChildStands(annotated, st)
 	raw := ResolveOperativeVRefs(refs, annotated, childStands, index, parentStand)
-	return ApplyChildFreshnessProof(raw, func(slug string) domain.FreshnessState {
+	proven := ApplyChildFreshnessProof(raw, func(slug string) domain.FreshnessState {
 		return EvaluateLeafChildFreshness(st, links, slug, ctx)
 	})
+	return MarkSupersededPastKindV(proven, annotated, childStands)
 }

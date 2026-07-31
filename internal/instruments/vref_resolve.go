@@ -30,7 +30,8 @@ func (a StoreBGBlIndex) LookupBGBlIndex(teil, year int, number string) (string, 
 // childStands map keyed by normalize.Key(lawID or slug).
 // index may be nil.
 // Does NOT set ChildConfirmed/Resolved — caller does Proof C Evaluate.
-// Sets Historical=true when identity matches only a past child's notes/stand.
+// Sets Historical=true when identity matches only a past child's notes/stand (non-V only).
+// Kind V past-only is left unmatched here; MarkSupersededPastKindV may supersede after Proof C.
 // MatchMethod: notes_identity | bgbl_index | ""
 func ResolveOperativeVRefs(
 	refs []domain.InstrumentRef,
@@ -47,6 +48,9 @@ func ResolveOperativeVRefs(
 			current = append(current, li)
 		case StatusPast:
 			past = append(past, li)
+		case "":
+			// Discovery edges without EffectiveFrom: current match candidates (Proof C still required).
+			current = append(current, li)
 		}
 	}
 
@@ -118,7 +122,7 @@ func isOperativeRefForResolve(ref domain.InstrumentRef, hasLinked bool) bool {
 		if strings.TrimSpace(ref.SectionHint) != "" {
 			return true
 		}
-		return hasLinked
+		return false
 	default:
 		return hasLinked && kind == ""
 	}

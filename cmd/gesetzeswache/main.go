@@ -29,7 +29,7 @@ import (
 )
 
 // var (not const) so release builds can inject the tag via -ldflags "-X main.version=...".
-var version = "0.2.0"
+var version = "0.5.0"
 
 func main() {
 	os.Exit(run(os.Args[1:]))

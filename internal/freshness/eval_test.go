@@ -276,6 +276,43 @@ func TestUncertainWhenSectionScopedBek(t *testing.T) {
 	}
 }
 
+func TestConfirmedCurrentWhenSeededAndBareBekIgnored(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	vRef := domain.InstrumentRef{
+		Kind: "V", Teil: 1, Year: 2025, Number: "268", SectionHint: "§ 1",
+		Raw: "§ 1 V v. 5.11.2025 I Nr. 268",
+	}
+	rec := Evaluate(Input{
+		LawID: "milog",
+		Stand: domain.StandCitation{
+			LawID: "milog", Year: 2026, Teil: 1, Number: "137", ParseOK: true,
+		},
+		InstrumentRefs: []domain.InstrumentRef{
+			{
+				Kind: "BEK", Teil: 1, Year: 2024, Number: "313",
+				Raw: "Bek. v. 17.10.2024 I Nr. 313",
+			},
+			vRef,
+		},
+		VRefResolutions: []domain.VRefResolution{{
+			Ref:            vRef,
+			MatchedGIISlug: "milov5",
+			MatchMethod:    "notes_identity",
+			ChildConfirmed: true,
+			Resolved:       true,
+		}},
+		HasSeededLinkedInstruments: true,
+		LastTOCSuccess:             now.Add(-time.Hour),
+		LastGIIFeedSuccess:         now.Add(-time.Hour),
+		LastBGBlSuccess:            now.Add(-time.Hour),
+		Now:                        now,
+		MaxAge:                     6 * time.Hour,
+	})
+	if rec.State != domain.FreshnessConfirmedCurrent {
+		t.Fatalf("got %s (%s) want confirmed_current; bare BEK must not block when V ref proven", rec.State, rec.Rationale)
+	}
+}
+
 func TestConfirmedCurrentWithProvenVRefResolution(t *testing.T) {
 	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
 	ref := domain.InstrumentRef{
@@ -332,6 +369,49 @@ func TestUncertainWithUnmatchedVRefAndEmptyResolutions(t *testing.T) {
 	}
 }
 
+func TestConfirmedCurrentWithSupersededPastKindVRef(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	ref268 := domain.InstrumentRef{
+		Kind: "V", Teil: 1, Year: 2025, Number: "268", SectionHint: "§ 1",
+		Raw: "§ 1 V v. 5.11.2025 I Nr. 268",
+	}
+	ref321 := domain.InstrumentRef{
+		Kind: "V", Teil: 1, Year: 2023, Number: "321", SectionHint: "§ 1",
+		Raw: "§ 1 V v. 1.1.2023 I Nr. 321",
+	}
+	rec := Evaluate(Input{
+		LawID: "milog",
+		Stand: domain.StandCitation{
+			LawID: "milog", Year: 2026, Teil: 1, Number: "137", ParseOK: true,
+		},
+		InstrumentRefs: []domain.InstrumentRef{ref268, ref321},
+		VRefResolutions: []domain.VRefResolution{
+			{
+				Ref:            ref268,
+				MatchedGIISlug: "milov5",
+				MatchMethod:    "notes_identity",
+				ChildConfirmed: true,
+				Resolved:       true,
+			},
+			{
+				Ref:          ref321,
+				Historical:   true,
+				MatchMethod:  "superseded_past_v",
+				SupersededBy: "milov5",
+			},
+		},
+		HasSeededLinkedInstruments: true,
+		LastTOCSuccess:             now.Add(-time.Hour),
+		LastGIIFeedSuccess:         now.Add(-time.Hour),
+		LastBGBlSuccess:            now.Add(-time.Hour),
+		Now:                        now,
+		MaxAge:                     6 * time.Hour,
+	})
+	if rec.State != domain.FreshnessConfirmedCurrent {
+		t.Fatalf("got %s (%s) want confirmed_current with superseded past Kind V", rec.State, rec.Rationale)
+	}
+}
+
 func TestConfirmedCurrentWithHistoricalPastVRef(t *testing.T) {
 	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
 	ref := domain.InstrumentRef{Kind: "", Teil: 1, Year: 2023, Number: "321"}
@@ -385,6 +465,9 @@ func TestUncertainWhenChildNotConfirmed(t *testing.T) {
 	if rec.State != domain.FreshnessUncertain {
 		t.Fatalf("got %s (%s) want uncertain when child not confirmed", rec.State, rec.Rationale)
 	}
+	if rec.Rationale != "linked_child_not_confirmed" {
+		t.Fatalf("rationale=%q want linked_child_not_confirmed", rec.Rationale)
+	}
 }
 
 func TestUncertainWhenResolvedWithoutChildConfirmed(t *testing.T) {
@@ -414,6 +497,43 @@ func TestUncertainWhenResolvedWithoutChildConfirmed(t *testing.T) {
 	})
 	if rec.State != domain.FreshnessUncertain {
 		t.Fatalf("got %s (%s) want uncertain when Resolved without ChildConfirmed", rec.State, rec.Rationale)
+	}
+	if rec.Rationale != "linked_child_not_confirmed" {
+		t.Fatalf("rationale=%q want linked_child_not_confirmed", rec.Rationale)
+	}
+}
+
+func TestUncertainRationaleUnmatchedBeatsChildNotConfirmed(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	matched := domain.InstrumentRef{
+		Kind: "V", Teil: 1, Year: 2025, Number: "268", SectionHint: "§ 1",
+	}
+	unmatched := domain.InstrumentRef{Kind: "V", Teil: 1, Year: 2025, Number: "999"}
+	rec := Evaluate(Input{
+		LawID: "milog",
+		Stand: domain.StandCitation{
+			LawID: "milog", Year: 2026, Teil: 1, Number: "137", ParseOK: true,
+		},
+		InstrumentRefs: []domain.InstrumentRef{matched, unmatched},
+		VRefResolutions: []domain.VRefResolution{{
+			Ref:            matched,
+			MatchedGIISlug: "milov5",
+			MatchMethod:    "notes_identity",
+			Resolved:       true,
+			ChildConfirmed: false,
+		}},
+		HasSeededLinkedInstruments: true,
+		LastTOCSuccess:             now.Add(-time.Hour),
+		LastGIIFeedSuccess:         now.Add(-time.Hour),
+		LastBGBlSuccess:            now.Add(-time.Hour),
+		Now:                        now,
+		MaxAge:                     6 * time.Hour,
+	})
+	if rec.State != domain.FreshnessUncertain {
+		t.Fatalf("got %s (%s) want uncertain", rec.State, rec.Rationale)
+	}
+	if rec.Rationale != "unresolved_linked_instrument_refs" {
+		t.Fatalf("rationale=%q want unresolved_linked_instrument_refs when any ref unmatched", rec.Rationale)
 	}
 }
 

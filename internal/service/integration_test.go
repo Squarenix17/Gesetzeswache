@@ -517,6 +517,199 @@ func TestIntegration_MiLoG_provenVRef_confirmedCurrent(t *testing.T) {
 	}
 }
 
+func TestIntegration_MiLoG_provenVRef_plusPastKindV321_confirmedCurrent(t *testing.T) {
+	mt := httpmock.New()
+	svc := newTestService(t, mt)
+	seedCatalog(t, svc, mt)
+
+	cat, err := instruments.LoadTSV(filepath.Join("..", "..", "variants", "linked_instruments.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.Instruments = cat
+
+	laws := []domain.Law{
+		{
+			ID: "milog", Abbreviation: "MiLoG", Title: "Mindestlohngesetz",
+			GIIPath: "milog", GIIURL: "https://www.gesetze-im-internet.de/milog/",
+		},
+		{
+			ID: "milov4", Abbreviation: "MiLoV4", Title: "Vierte Mindestlohnanpassungsverordnung",
+			GIIPath: "milov4", GIIURL: "https://www.gesetze-im-internet.de/milov4/",
+		},
+		{
+			ID: "milov5", Abbreviation: "MiLoV5", Title: "Fünfte Mindestlohnanpassungsverordnung",
+			GIIPath: "milov5", GIIURL: "https://www.gesetze-im-internet.de/milov5/",
+		},
+	}
+	if err := svc.Store.UpsertLaws(laws); err != nil {
+		t.Fatal(err)
+	}
+	catalogLaws, _ := svc.Store.ListLaws()
+	variants, _ := svc.Store.ListVariants()
+	svc.Search.Swap(catalogLaws, variants)
+
+	now := time.Now().UTC()
+	seedSyncFreshMeta(t, svc, now)
+
+	parentStand := citation.Parse("milog", "Zuletzt geändert durch Art. 8 Abs. 3 G v. 12.5.2026 I Nr. 137")
+	if !parentStand.ParseOK {
+		t.Fatalf("parent stand parse failed: %+v", parentStand)
+	}
+	if err := svc.Store.UpsertStand(parentStand); err != nil {
+		t.Fatal(err)
+	}
+
+	childStandV5 := citation.Parse("milov5", "BGBl. 2025 I Nr. 268")
+	if !childStandV5.ParseOK {
+		t.Fatalf("child stand parse failed: %+v", childStandV5)
+	}
+	if err := svc.Store.UpsertStand(childStandV5); err != nil {
+		t.Fatal(err)
+	}
+	childStandV4 := citation.Parse("milov4", "BGBl. 2023 I Nr. 321")
+	if !childStandV4.ParseOK {
+		t.Fatalf("milov4 stand parse failed: %+v", childStandV4)
+	}
+	if err := svc.Store.UpsertStand(childStandV4); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Store.UpsertIssue(domain.GazetteIssue{
+		ID: citation.IssueID(1, 2025, "268"), Teil: 1, Year: 2025, Number: "268",
+		Title: "Fünfte Mindestlohnanpassungsverordnung",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	editorial := "(+++ § 1 V v. 5.11.2025 I Nr. 268 +++)\n(+++ § 1 V v. 1.1.2023 I Nr. 321 +++)"
+	if err := svc.Store.SetMeta("editorial:milog", editorial); err != nil {
+		t.Fatal(err)
+	}
+
+	meta, err := svc.Freshness(context.Background(), "milog", IncludeOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.State != domain.FreshnessConfirmedCurrent {
+		t.Fatalf("want confirmed_current; got %s (%s) refs=%+v", meta.State, meta.Rationale, meta.InstrumentRefs)
+	}
+	if meta.Rationale == "unresolved_linked_instrument_refs" {
+		t.Fatalf("rationale must not be unresolved_linked_instrument_refs; refs=%+v", meta.InstrumentRefs)
+	}
+	found268, found321 := false, false
+	for _, r := range meta.InstrumentRefs {
+		if r.Kind == "V" && r.Year == 2025 && r.Number == "268" {
+			found268 = true
+		}
+		if r.Kind == "V" && r.Year == 2023 && r.Number == "321" {
+			found321 = true
+		}
+	}
+	if !found268 || !found321 {
+		t.Fatalf("expected Kind V refs 268 and 321; got %+v", meta.InstrumentRefs)
+	}
+}
+
+func TestIntegration_MiLoG_provenVRef_plusPastKindV321_plusBareBek313_confirmedCurrent(t *testing.T) {
+	mt := httpmock.New()
+	svc := newTestService(t, mt)
+	seedCatalog(t, svc, mt)
+
+	cat, err := instruments.LoadTSV(filepath.Join("..", "..", "variants", "linked_instruments.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.Instruments = cat
+
+	laws := []domain.Law{
+		{
+			ID: "milog", Abbreviation: "MiLoG", Title: "Mindestlohngesetz",
+			GIIPath: "milog", GIIURL: "https://www.gesetze-im-internet.de/milog/",
+		},
+		{
+			ID: "milov4", Abbreviation: "MiLoV4", Title: "Vierte Mindestlohnanpassungsverordnung",
+			GIIPath: "milov4", GIIURL: "https://www.gesetze-im-internet.de/milov4/",
+		},
+		{
+			ID: "milov5", Abbreviation: "MiLoV5", Title: "Fünfte Mindestlohnanpassungsverordnung",
+			GIIPath: "milov5", GIIURL: "https://www.gesetze-im-internet.de/milov5/",
+		},
+	}
+	if err := svc.Store.UpsertLaws(laws); err != nil {
+		t.Fatal(err)
+	}
+	catalogLaws, _ := svc.Store.ListLaws()
+	variants, _ := svc.Store.ListVariants()
+	svc.Search.Swap(catalogLaws, variants)
+
+	now := time.Now().UTC()
+	seedSyncFreshMeta(t, svc, now)
+
+	parentStand := citation.Parse("milog", "Zuletzt geändert durch Art. 8 Abs. 3 G v. 12.5.2026 I Nr. 137")
+	if !parentStand.ParseOK {
+		t.Fatalf("parent stand parse failed: %+v", parentStand)
+	}
+	if err := svc.Store.UpsertStand(parentStand); err != nil {
+		t.Fatal(err)
+	}
+
+	childStandV5 := citation.Parse("milov5", "BGBl. 2025 I Nr. 268")
+	if !childStandV5.ParseOK {
+		t.Fatalf("child stand parse failed: %+v", childStandV5)
+	}
+	if err := svc.Store.UpsertStand(childStandV5); err != nil {
+		t.Fatal(err)
+	}
+	childStandV4 := citation.Parse("milov4", "BGBl. 2023 I Nr. 321")
+	if !childStandV4.ParseOK {
+		t.Fatalf("milov4 stand parse failed: %+v", childStandV4)
+	}
+	if err := svc.Store.UpsertStand(childStandV4); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Store.UpsertIssue(domain.GazetteIssue{
+		ID: citation.IssueID(1, 2025, "268"), Teil: 1, Year: 2025, Number: "268",
+		Title: "Fünfte Mindestlohnanpassungsverordnung",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	editorial := strings.Join([]string{
+		"(+++ Bek. v. 17.10.2024 I Nr. 313 +++)",
+		"(+++ § 1 V v. 5.11.2025 I Nr. 268 +++)",
+		"(+++ § 1 V v. 1.1.2023 I Nr. 321 +++)",
+	}, "\n")
+	if err := svc.Store.SetMeta("editorial:milog", editorial); err != nil {
+		t.Fatal(err)
+	}
+
+	meta, err := svc.Freshness(context.Background(), "milog", IncludeOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.State != domain.FreshnessConfirmedCurrent {
+		t.Fatalf("want confirmed_current; got %s (%s) refs=%+v", meta.State, meta.Rationale, meta.InstrumentRefs)
+	}
+	if meta.Rationale == "unresolved_linked_instrument_refs" {
+		t.Fatalf("bare Bek 313 must not block when V refs proven; refs=%+v", meta.InstrumentRefs)
+	}
+	foundBek313, found268, found321 := false, false, false
+	for _, r := range meta.InstrumentRefs {
+		if r.Kind == "BEK" && r.Year == 2024 && r.Number == "313" {
+			foundBek313 = true
+		}
+		if r.Kind == "V" && r.Year == 2025 && r.Number == "268" {
+			found268 = true
+		}
+		if r.Kind == "V" && r.Year == 2023 && r.Number == "321" {
+			found321 = true
+		}
+	}
+	if !foundBek313 || !found268 || !found321 {
+		t.Fatalf("expected Bek 313 + Kind V refs 268 and 321; got %+v", meta.InstrumentRefs)
+	}
+}
+
 func TestIntegration_MiLoG_matchedButChildProbeOnly_uncertain(t *testing.T) {
 	mt := httpmock.New()
 	svc := newTestService(t, mt)
@@ -625,7 +818,7 @@ func TestIntegration_SGB11_discovered_withoutTSV(t *testing.T) {
 	if meta.State != domain.FreshnessUncertain {
 		t.Fatalf("state=%s want uncertain", meta.State)
 	}
-	if meta.Rationale != "unresolved_linked_instrument_refs" {
+	if meta.Rationale != "linked_child_not_confirmed" {
 		t.Fatalf("rationale=%q", meta.Rationale)
 	}
 	if len(meta.LinkedInstruments) != 1 || meta.LinkedInstruments[0].GIISlug != "pbav_2025" {
@@ -685,7 +878,7 @@ func TestIntegration_SGB11_pbav2025_linkedInstrument(t *testing.T) {
 	if meta.State == domain.FreshnessConfirmedCurrent {
 		t.Fatalf("parent must not be confirmed_current; state=%s rationale=%s", meta.State, meta.Rationale)
 	}
-	if meta.Rationale != "unresolved_linked_instrument_refs" {
+	if meta.Rationale != "linked_child_not_confirmed" {
 		t.Fatalf("rationale=%q", meta.Rationale)
 	}
 

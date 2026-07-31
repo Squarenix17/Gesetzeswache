@@ -125,6 +125,97 @@ func TestExportOperativeBundle_MiLoG_currentOnly(t *testing.T) {
 	}
 }
 
+func TestExportOperativeBundle_MiLoG_supersededPastKindV_safeToServe(t *testing.T) {
+	mt := httpmock.New()
+	svc := newTestService(t, mt)
+	seedCatalog(t, svc, mt)
+
+	cat, err := instruments.LoadTSV(filepath.Join("..", "..", "variants", "linked_instruments.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.Instruments = cat
+
+	laws := []domain.Law{
+		{
+			ID: "milog", Abbreviation: "MiLoG", Title: "Mindestlohngesetz",
+			GIIPath: "milog", GIIURL: "https://www.gesetze-im-internet.de/milog/",
+		},
+		{
+			ID: "milov4", Abbreviation: "MiLoV4", Title: "Vierte Mindestlohnanpassungsverordnung",
+			GIIPath: "milov4", GIIURL: "https://www.gesetze-im-internet.de/milov4/",
+		},
+		{
+			ID: "milov5", Abbreviation: "MiLoV5", Title: "Fünfte Mindestlohnanpassungsverordnung",
+			GIIPath: "milov5", GIIURL: "https://www.gesetze-im-internet.de/milov5/",
+		},
+	}
+	if err := svc.Store.UpsertLaws(laws); err != nil {
+		t.Fatal(err)
+	}
+	catalogLaws, _ := svc.Store.ListLaws()
+	variants, _ := svc.Store.ListVariants()
+	svc.Search.Swap(catalogLaws, variants)
+
+	now := time.Now().UTC()
+	seedSyncFreshMeta(t, svc, now)
+
+	parentStand := citation.Parse("milog", "Zuletzt geändert durch Art. 8 Abs. 3 G v. 12.5.2026 I Nr. 137")
+	if !parentStand.ParseOK {
+		t.Fatalf("parent stand parse failed: %+v", parentStand)
+	}
+	if err := svc.Store.UpsertStand(parentStand); err != nil {
+		t.Fatal(err)
+	}
+	childStandV5 := citation.Parse("milov5", "BGBl. 2025 I Nr. 268")
+	if !childStandV5.ParseOK {
+		t.Fatalf("child stand parse failed: %+v", childStandV5)
+	}
+	if err := svc.Store.UpsertStand(childStandV5); err != nil {
+		t.Fatal(err)
+	}
+	childStandV4 := citation.Parse("milov4", "BGBl. 2023 I Nr. 321")
+	if !childStandV4.ParseOK {
+		t.Fatalf("milov4 stand parse failed: %+v", childStandV4)
+	}
+	if err := svc.Store.UpsertStand(childStandV4); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Store.UpsertIssue(domain.GazetteIssue{
+		ID: citation.IssueID(1, 2025, "268"), Teil: 1, Year: 2025, Number: "268",
+		Title: "Fünfte Mindestlohnanpassungsverordnung",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	editorial := "(+++ § 1 V v. 5.11.2025 I Nr. 268 +++)\n(+++ § 1 V v. 1.1.2023 I Nr. 321 +++)"
+	if err := svc.Store.SetMeta("editorial:milog", editorial); err != nil {
+		t.Fatal(err)
+	}
+
+	mt.SetBytes("www.gesetze-im-internet.de", "/milog/xml.zip",
+		fixtures.MustZipXML("milog.xml", fixtures.MustRead("milog_snippet.xml")))
+	mt.SetBytes("www.gesetze-im-internet.de", "/milov5/xml.zip",
+		fixtures.MustZipXML("milov5.xml", fixtures.MustRead("milov5_snippet.xml")))
+	mt.SetBytes("www.gesetze-im-internet.de", "/milov4/xml.zip",
+		fixtures.MustZipXML("milov4.xml", fixtures.MustRead("milov5_snippet.xml")))
+
+	res, err := svc.ExportOperativeBundle(context.Background(), "MiLoG",
+		[]string{export.FormatHierarchical}, BundleOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.BundleFreshness == nil {
+		t.Fatal("expected bundle freshness")
+	}
+	if !res.BundleFreshness.SafeToServe {
+		t.Fatalf("safe_to_serve should be true for superseded scenario: %+v", res.BundleFreshness)
+	}
+	if res.BundleFreshness.State != domain.FreshnessConfirmedCurrent {
+		t.Fatalf("bundle state=%s want confirmed_current; freshness=%+v", res.BundleFreshness.State, res.BundleFreshness)
+	}
+}
+
 func TestExportOperativeBundle_composeDisplayOnly(t *testing.T) {
 	mt := httpmock.New()
 	svc := newTestService(t, mt)

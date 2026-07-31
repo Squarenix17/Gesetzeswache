@@ -110,10 +110,10 @@ func Evaluate(in Input) domain.FreshnessRecord {
 
 	// Parsed Stand: unresolved instrument refs that cite known BGBl identity but weren't
 	// reflected / compared into a conclusive current claim → uncertain.
-	if unresolvedInstrumentRefs(in) {
+	if unresolved, rationale := unresolvedInstrumentRefs(in); unresolved {
 		rec.State = domain.FreshnessUncertain
 		rec.Confidence = lowerConfidence(rec.Confidence)
-		rec.Rationale = "unresolved_linked_instrument_refs"
+		rec.Rationale = rationale
 		return rec
 	}
 
@@ -186,12 +186,15 @@ func onlyHeuristicLinks(in Input) bool {
 	return hasHeuristic && !hasConfirmed
 }
 
-func unresolvedInstrumentRefs(in Input) bool {
+func unresolvedInstrumentRefs(in Input) (bool, string) {
 	if len(in.InstrumentRefs) == 0 {
-		return false
+		return false, ""
 	}
 	if in.VRefResolutions == nil {
-		return unresolvedInstrumentRefsBlunt(in)
+		if unresolvedInstrumentRefsBlunt(in) {
+			return true, "unresolved_linked_instrument_refs"
+		}
+		return false, ""
 	}
 	return unresolvedInstrumentRefsProof(in)
 }
@@ -213,7 +216,9 @@ func unresolvedInstrumentRefsBlunt(in Input) bool {
 }
 
 // unresolvedInstrumentRefsProof uses computed V-ref resolutions (Proof Model C).
-func unresolvedInstrumentRefsProof(in Input) bool {
+func unresolvedInstrumentRefsProof(in Input) (bool, string) {
+	hasUnmatched := false
+	hasUnconfirmedChild := false
 	for _, ref := range in.InstrumentRefs {
 		if ref.Year == 0 || (ref.Number == "" && ref.Teil == 0) {
 			continue
@@ -226,7 +231,8 @@ func unresolvedInstrumentRefsProof(in Input) bool {
 		}
 		res, ok := findVRefResolution(in.VRefResolutions, ref)
 		if !ok {
-			return true
+			hasUnmatched = true
+			continue
 		}
 		if res.Historical {
 			continue
@@ -235,9 +241,19 @@ func unresolvedInstrumentRefsProof(in Input) bool {
 		if res.Resolved && res.ChildConfirmed {
 			continue
 		}
-		return true
+		if res.MatchedGIISlug != "" {
+			hasUnconfirmedChild = true
+		} else {
+			hasUnmatched = true
+		}
 	}
-	return false
+	if !hasUnmatched && !hasUnconfirmedChild {
+		return false, ""
+	}
+	if hasUnmatched {
+		return true, "unresolved_linked_instrument_refs"
+	}
+	return true, "linked_child_not_confirmed"
 }
 
 func standReflectsRef(stand domain.StandCitation, ref domain.InstrumentRef) bool {
@@ -258,7 +274,7 @@ func isOperativeInstrumentRef(ref domain.InstrumentRef, hasSeeded bool) bool {
 		if strings.TrimSpace(ref.SectionHint) != "" {
 			return true
 		}
-		return hasSeeded
+		return false
 	default:
 		return hasSeeded && kind == ""
 	}

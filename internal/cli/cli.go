@@ -21,7 +21,7 @@ func Run(ctx context.Context, svc *service.Service, args []string) int {
 	case "resolve":
 		opts, rest := peelIncludeFlags(args[1:])
 		if len(rest) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: resolve [--include=past,linked] <query>")
+			fmt.Fprintln(os.Stderr, "usage: resolve [--include=past,linked,proof] <query>")
 			return 2
 		}
 		res, err := svc.Resolve(ctx, strings.Join(rest, " "), opts)
@@ -29,7 +29,7 @@ func Run(ctx context.Context, svc *service.Service, args []string) int {
 	case "freshness":
 		opts, rest := peelIncludeFlags(args[1:])
 		if len(rest) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: freshness [--include=past,linked] <id-or-abbr>")
+			fmt.Fprintln(os.Stderr, "usage: freshness [--include=past,linked,proof] <id-or-abbr>")
 			return 2
 		}
 		res, err := svc.Freshness(ctx, rest[0], opts)
@@ -100,6 +100,7 @@ func peelIncludeFlags(args []string) (service.IncludeOpts, []string) {
 			part := service.ParseInclude(strings.TrimPrefix(a, "--include="))
 			opts.Past = opts.Past || part.Past
 			opts.Linked = opts.Linked || part.Linked
+			opts.Proof = opts.Proof || part.Proof
 			continue
 		}
 		if a == "--include" {

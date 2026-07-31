@@ -93,6 +93,71 @@ func TestAnnotateChain_differentSectionHintsBothCurrent(t *testing.T) {
 	}
 }
 
+func TestFilterBundleMembers_emptyStatusDiscoveredHighKept(t *testing.T) {
+	rows := []domain.LinkedInstrument{
+		{
+			ParentLawID: "bgb", Kind: "verordnung", GIISlug: "minuhv",
+			Source: "discovered", Confidence: "high", SectionHint: "§ 1612a",
+		},
+	}
+	got := FilterBundleMembers(rows, false)
+	if len(got) != 1 || got[0].GIISlug != "minuhv" {
+		t.Fatalf("want discovered high empty status kept; got %+v", got)
+	}
+}
+
+func TestFilterBundleMembers_emptySeededDropped(t *testing.T) {
+	rows := []domain.LinkedInstrument{
+		{
+			ParentLawID: "milog", Kind: "verordnung", GIISlug: "milov4",
+			Source: "seeded", SectionHint: "§ 1",
+		},
+	}
+	got := FilterBundleMembers(rows, false)
+	if len(got) != 0 {
+		t.Fatalf("want seeded empty status dropped; got %+v", got)
+	}
+}
+
+func TestFilterBundleMembers_emptyDiscoveredMediumDropped(t *testing.T) {
+	rows := []domain.LinkedInstrument{
+		{
+			ParentLawID: "bgb", Kind: "verordnung", GIISlug: "minuhv",
+			Source: "discovered", Confidence: "medium", SectionHint: "§ 1612a",
+		},
+	}
+	got := FilterBundleMembers(rows, false)
+	if len(got) != 0 {
+		t.Fatalf("want discovered medium empty status dropped; got %+v", got)
+	}
+}
+
+func TestFilterBundleMembers_statusCurrentKept(t *testing.T) {
+	rows := []domain.LinkedInstrument{
+		{
+			ParentLawID: "milog", Kind: "verordnung", GIISlug: "milov5",
+			Status: StatusCurrent, EffectiveFrom: "2026-01-01", SectionHint: "§ 1",
+		},
+	}
+	got := FilterBundleMembers(rows, false)
+	if len(got) != 1 || got[0].GIISlug != "milov5" {
+		t.Fatalf("want status current kept; got %+v", got)
+	}
+}
+
+func TestFilterBundleMembers_statusFutureDropped(t *testing.T) {
+	rows := []domain.LinkedInstrument{
+		{
+			ParentLawID: "milog", Kind: "verordnung", GIISlug: "milov5",
+			Status: StatusFuture, EffectiveFrom: "2026-01-01", SectionHint: "§ 1",
+		},
+	}
+	got := FilterBundleMembers(rows, false)
+	if len(got) != 0 {
+		t.Fatalf("want status future dropped; got %+v", got)
+	}
+}
+
 func TestAnnotateChain_noEffectiveFromLeavesStatusEmpty(t *testing.T) {
 	rows := []domain.LinkedInstrument{
 		{ParentLawID: "milog", Kind: "verordnung", GIISlug: "milov4", SectionHint: "§ 1"},

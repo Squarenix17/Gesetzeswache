@@ -6,6 +6,7 @@ import "strings"
 type IncludeOpts struct {
 	Past   bool // include status=past instruments
 	Linked bool // attach child law pointers (law_id, gii_url, resolve_ok)
+	Proof  bool // attach computed V-ref resolutions (read-only)
 }
 
 // ParseInclude parses comma-separated include tokens (e.g. "past,linked").
@@ -17,6 +18,8 @@ func ParseInclude(raw string) IncludeOpts {
 			o.Past = true
 		case "linked":
 			o.Linked = true
+		case "proof":
+			o.Proof = true
 		}
 	}
 	return o
@@ -29,6 +32,7 @@ func MergeInclude(values []string) IncludeOpts {
 		p := ParseInclude(v)
 		o.Past = o.Past || p.Past
 		o.Linked = o.Linked || p.Linked
+		o.Proof = o.Proof || p.Proof
 	}
 	return o
 }

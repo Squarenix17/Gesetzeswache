@@ -60,10 +60,11 @@ type InstrumentRef struct {
 type VRefResolution struct {
 	Ref            InstrumentRef `json:"ref"`
 	MatchedGIISlug string        `json:"matched_gii_slug,omitempty"`
-	MatchMethod    string        `json:"match_method,omitempty"` // notes_identity | bgbl_index | ""
+	MatchMethod    string        `json:"match_method,omitempty"` // notes_identity | bgbl_index | superseded_past_v | ""
 	ChildConfirmed bool          `json:"child_confirmed,omitempty"`
 	Resolved       bool          `json:"resolved,omitempty"`
-	Historical     bool          `json:"historical,omitempty"` // past-chain only (non-V); ignore for unresolved
+	Historical     bool          `json:"historical,omitempty"` // past-chain non-V OR superseded past Kind V
+	SupersededBy   string        `json:"superseded_by,omitempty"` // current sibling slug when MatchMethod=superseded_past_v
 }
 
 // LinkedInstrument maps a parent law to a related ordinance/instrument (seeded TSV).

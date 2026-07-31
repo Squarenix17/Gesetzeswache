@@ -506,6 +506,10 @@ func IngestLawXML(st IngestStore, lookup ParentLookup, law domain.Law, xmlData [
 			notes = agg.raw
 		}
 
+		// Do not map ausfertigung-datum onto EffectiveFrom: that field is Inkrafttreten.
+		// Ausfertigung often precedes in-force (e.g. MiLoV5 2025-11-05 vs 2026-01-01).
+		// Leave empty so AnnotateChain keeps Status=""; Phase B empty-status match +
+		// FilterBundleMembers (discovered+high) still cover undated high-confidence edges.
 		toPersist = append(toPersist, domain.DiscoveredEdge{
 			ParentLawID: parentID,
 			GIISlug:     law.GIIPath,

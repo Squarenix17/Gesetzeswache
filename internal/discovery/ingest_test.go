@@ -142,6 +142,48 @@ func TestIngestLawXML_MinUhV_discoversBGB(t *testing.T) {
 	if e.Confidence != ConfidenceHigh {
 		t.Fatalf("Confidence=%q want high", e.Confidence)
 	}
+	if e.EffectiveFrom != "" {
+		t.Fatalf("EffectiveFrom=%q want empty (minuhv fixture lacks ausfertigung-datum)", e.EffectiveFrom)
+	}
+}
+
+func TestIngestLawXML_EffectiveFrom_notFromAusfertigungDatum(t *testing.T) {
+	// Ausfertigung ≠ Inkrafttreten; do not write EffectiveFrom from ausfertigung-datum alone.
+	st := newMemIngestStore()
+	lookup := CatalogLookup{
+		Laws: []domain.Law{
+			{ID: "bgb", Abbreviation: "BGB", Title: "Bürgerliches Gesetzbuch", GIIPath: "bgb"},
+			{
+				ID: "minuhv", Abbreviation: "MinUhV", GIIPath: "minuhv",
+				Title: "Verordnung zur Festlegung des Mindestunterhalts minderjähriger Kinder nach § 1612a Absatz 1 des Bürgerlichen Gesetzbuchs",
+			},
+		},
+	}
+	law := domain.Law{
+		ID:           "minuhv",
+		Abbreviation: "MinUhV",
+		Title:        "Verordnung zur Festlegung des Mindestunterhalts minderjähriger Kinder nach § 1612a Absatz 1 des Bürgerlichen Gesetzbuchs",
+		GIIPath:      "minuhv",
+	}
+	xmlData := []byte(`<?xml version="1.0"?><dokument><norm><metadaten>
+      <fundstelle><periodikum>BGBl. I</periodikum><zit>2015 Nr. 2188</zit></fundstelle>
+      <ausfertigung-datum man="ja">2015-12-01</ausfertigung-datum>
+    </metadaten><textdaten><text><Content><P>Auf Grund des § 1612a Absatz 4 des Bürgerlichen Gesetzbuchs, der durch Artikel 1 Nummer 3 des Gesetzes vom 20. November 2015 (BGBl. I S. 2018) eingefügt worden ist, verordnet das Bundesministerium der Justiz und für Verbraucherschutz:</P></Content></text></textdaten></norm></dokument>`)
+
+	n, err := IngestLawXML(st, lookup, law, xmlData)
+	if err != nil {
+		t.Fatalf("IngestLawXML: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("nLinks=%d want 1; discovered=%+v", n, st.discovered)
+	}
+	edges := st.discovered["bgb|minuhv"]
+	if len(edges) != 1 {
+		t.Fatalf("discovered edges=%d want 1; all=%+v", len(edges), st.discovered)
+	}
+	if edges[0].EffectiveFrom != "" {
+		t.Fatalf("EffectiveFrom=%q want empty (ausfertigung must not become Inkrafttreten)", edges[0].EffectiveFrom)
+	}
 }
 
 func TestFundstelleFromXML_PBAV(t *testing.T) {

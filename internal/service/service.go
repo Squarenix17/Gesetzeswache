@@ -70,6 +70,7 @@ type FreshnessMeta struct {
 	BGBlPointers      []string                  `json:"bgbl_pointers,omitempty"`
 	LinkedInstruments []domain.LinkedInstrument `json:"linked_instruments,omitempty"`
 	InstrumentRefs    []domain.InstrumentRef    `json:"instrument_refs,omitempty"`
+	Proof             []domain.VRefResolution   `json:"proof,omitempty"`
 }
 
 type ResolveResult struct {
@@ -257,6 +258,9 @@ func (s *Service) freshnessFor(lawID string, opts IncludeOpts) (FreshnessMeta, e
 	}
 	if !bgbl.IsZero() {
 		meta.LastBGBlSuccess = &bgbl
+	}
+	if opts.Proof {
+		meta.Proof = vrefResolutions
 	}
 	return meta, nil
 }

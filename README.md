@@ -84,7 +84,7 @@ It syncs a lightweight catalog from [Gesetze im Internet](https://www.gesetze-im
 
 These are intentional or known behaviours — they are easy to misread as bugs:
 
-1. **`uncertain` is normal for some laws.** Parents with linked ordinances (e.g. MiLoG) often stay `uncertain` until ordinance citations are verified. That is fail-closed behaviour, not a failed lookup. Sync can still be healthy while a law is `uncertain`.
+1. **`uncertain` is normal for some laws.** Parents with linked ordinances (e.g. MiLoG) stay `uncertain` until each operative citation is proven against a current linked child that is itself `confirmed_current`. That is fail-closed behaviour, not a failed lookup. Sync can still be healthy while a law is `uncertain`.
 2. **Freshness is a contract, not decoration.** Do not index or serve text as “current” unless freshness (or for bundles, `bundle_freshness.safe_to_serve`) allows it.
 3. **Linked Verordnungen are not the same as parent §§.** MiLoV5 § 2 is not MiLoG § 2. Use `section_hint` / `parent_section_hint` as attachment metadata, not as a 1:1 section map.
 4. **CLI and `serve` share one database file.** Do not run both at once against the same `gesetzeswache.db` (lock / timeout errors).

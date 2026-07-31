@@ -106,6 +106,20 @@ func seedSyncFreshMeta(t *testing.T, svc *Service, now time.Time) {
 	}
 }
 
+// seedProbeOnlyBGBlMeta keeps TOC/GII fresh but supplies BGBl evidence only via ELI probe.
+func seedProbeOnlyBGBlMeta(t *testing.T, svc *Service, now time.Time) {
+	t.Helper()
+	if err := svc.Store.SetMetaTime("last_toc_success", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Store.SetMetaTime("last_gii_feed_success", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Store.SetMetaTime("last_eli_probe_success", now); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestIntegration_CatalogNotReady(t *testing.T) {
 	mt := httpmock.New()
 	svc := newTestService(t, mt)
@@ -214,7 +228,7 @@ func TestIntegration_ExportMalformedXML(t *testing.T) {
 }
 
 func TestIntegration_MiLoG_seedNotes_withoutExport_notConfirmedCurrent(t *testing.T) {
-	// Seed TSV notes cite Nr. 268; no export/editorial blob — Resolve freshness must still fail closed.
+	// Seed TSV notes cite Nr. 268; no export/editorial blob — child Stand missing → Proof C not satisfied.
 	mt := httpmock.New()
 	svc := newTestService(t, mt)
 	seedCatalog(t, svc, mt)
@@ -265,7 +279,7 @@ func TestIntegration_MiLoG_seedNotes_withoutExport_notConfirmedCurrent(t *testin
 
 func TestIntegration_MiLoG_plusPlusVerordnung_notConfirmedCurrent(t *testing.T) {
 	// Live-equivalent: MiLoG Stand is a different G (Nr. 137); +++ cites Verordnung I Nr. 268
-	// whose BGBl title omits "MiLoG" so title heuristics do not link — must not be confirmed_current.
+	// whose BGBl title omits "MiLoG" so title heuristics do not link — child Stand missing → Proof C not satisfied.
 	mt := httpmock.New()
 	svc := newTestService(t, mt)
 	seedCatalog(t, svc, mt)
@@ -432,6 +446,135 @@ func TestIntegration_MiLoG_linkedChain_currentOnlyByDefault(t *testing.T) {
 	}
 }
 
+func TestIntegration_MiLoG_provenVRef_confirmedCurrent(t *testing.T) {
+	mt := httpmock.New()
+	svc := newTestService(t, mt)
+	seedCatalog(t, svc, mt)
+
+	cat, err := instruments.LoadTSV(filepath.Join("..", "..", "variants", "linked_instruments.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.Instruments = cat
+
+	laws := []domain.Law{
+		{
+			ID: "milog", Abbreviation: "MiLoG", Title: "Mindestlohngesetz",
+			GIIPath: "milog", GIIURL: "https://www.gesetze-im-internet.de/milog/",
+		},
+		{
+			ID: "milov5", Abbreviation: "MiLoV5", Title: "Fünfte Mindestlohnanpassungsverordnung",
+			GIIPath: "milov5", GIIURL: "https://www.gesetze-im-internet.de/milov5/",
+		},
+	}
+	if err := svc.Store.UpsertLaws(laws); err != nil {
+		t.Fatal(err)
+	}
+	catalogLaws, _ := svc.Store.ListLaws()
+	variants, _ := svc.Store.ListVariants()
+	svc.Search.Swap(catalogLaws, variants)
+
+	now := time.Now().UTC()
+	seedSyncFreshMeta(t, svc, now)
+
+	parentStand := citation.Parse("milog", "Zuletzt geändert durch Art. 8 Abs. 3 G v. 12.5.2026 I Nr. 137")
+	if !parentStand.ParseOK {
+		t.Fatalf("parent stand parse failed: %+v", parentStand)
+	}
+	if err := svc.Store.UpsertStand(parentStand); err != nil {
+		t.Fatal(err)
+	}
+
+	childStand := citation.Parse("milov5", "BGBl. 2025 I Nr. 268")
+	if !childStand.ParseOK {
+		t.Fatalf("child stand parse failed: %+v", childStand)
+	}
+	if err := svc.Store.UpsertStand(childStand); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Store.UpsertIssue(domain.GazetteIssue{
+		ID: citation.IssueID(1, 2025, "268"), Teil: 1, Year: 2025, Number: "268",
+		Title: "Fünfte Mindestlohnanpassungsverordnung",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	meta, err := svc.Freshness(context.Background(), "milog", IncludeOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.State != domain.FreshnessConfirmedCurrent {
+		t.Fatalf("want confirmed_current; got %s (%s) refs=%+v", meta.State, meta.Rationale, meta.InstrumentRefs)
+	}
+	if meta.Rationale == "unresolved_linked_instrument_refs" {
+		t.Fatalf("rationale must not be unresolved_linked_instrument_refs; refs=%+v", meta.InstrumentRefs)
+	}
+	if len(meta.LinkedInstruments) != 1 || meta.LinkedInstruments[0].GIISlug != "milov5" {
+		t.Fatalf("default want [milov5] current; got %+v", meta.LinkedInstruments)
+	}
+	if meta.LinkedInstruments[0].Status != instruments.StatusCurrent {
+		t.Fatalf("status=%s want current", meta.LinkedInstruments[0].Status)
+	}
+}
+
+func TestIntegration_MiLoG_matchedButChildProbeOnly_uncertain(t *testing.T) {
+	mt := httpmock.New()
+	svc := newTestService(t, mt)
+	seedCatalog(t, svc, mt)
+
+	cat, err := instruments.LoadTSV(filepath.Join("..", "..", "variants", "linked_instruments.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.Instruments = cat
+
+	laws := []domain.Law{
+		{
+			ID: "milog", Abbreviation: "MiLoG", Title: "Mindestlohngesetz",
+			GIIPath: "milog", GIIURL: "https://www.gesetze-im-internet.de/milog/",
+		},
+		{
+			ID: "milov5", Abbreviation: "MiLoV5", Title: "Fünfte Mindestlohnanpassungsverordnung",
+			GIIPath: "milov5", GIIURL: "https://www.gesetze-im-internet.de/milov5/",
+		},
+	}
+	if err := svc.Store.UpsertLaws(laws); err != nil {
+		t.Fatal(err)
+	}
+	catalogLaws, _ := svc.Store.ListLaws()
+	variants, _ := svc.Store.ListVariants()
+	svc.Search.Swap(catalogLaws, variants)
+
+	now := time.Now().UTC()
+	seedProbeOnlyBGBlMeta(t, svc, now)
+
+	parentStand := citation.Parse("milog", "Zuletzt geändert durch Art. 8 Abs. 3 G v. 12.5.2026 I Nr. 137")
+	if !parentStand.ParseOK {
+		t.Fatalf("parent stand parse failed: %+v", parentStand)
+	}
+	if err := svc.Store.UpsertStand(parentStand); err != nil {
+		t.Fatal(err)
+	}
+	childStand := citation.Parse("milov5", "BGBl. 2025 I Nr. 268")
+	if !childStand.ParseOK {
+		t.Fatalf("child stand parse failed: %+v", childStand)
+	}
+	if err := svc.Store.UpsertStand(childStand); err != nil {
+		t.Fatal(err)
+	}
+
+	meta, err := svc.Freshness(context.Background(), "milog", IncludeOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.State != domain.FreshnessUncertain {
+		t.Fatalf("want uncertain when BGBl evidence is probe-only; got %s (%s)", meta.State, meta.Rationale)
+	}
+	if meta.Rationale != "bgbl_evidence_probe_only" {
+		t.Fatalf("rationale=%q want bgbl_evidence_probe_only", meta.Rationale)
+	}
+}
+
 func TestIntegration_SGB11_discovered_withoutTSV(t *testing.T) {
 	// No TSV seed — discovered edge from PBAV XML ingest must drive linked_instruments + fail-safe.
 	mt := httpmock.New()
@@ -559,6 +702,111 @@ func TestIntegration_SGB11_pbav2025_linkedInstrument(t *testing.T) {
 	}
 	if _, ok, _ := svc.Store.GetLaw("pbav2025"); !ok {
 		t.Fatal("expected pbav2025 stub in catalog")
+	}
+}
+
+func TestIntegration_SGB11_provenPBAV_confirmedCurrent(t *testing.T) {
+	mt := httpmock.New()
+	svc := newTestService(t, mt)
+	seedCatalog(t, svc, mt)
+
+	cat, err := instruments.LoadTSV(filepath.Join("..", "..", "variants", "linked_instruments.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.Instruments = cat
+
+	laws := []domain.Law{
+		{
+			ID: "sgb11", Abbreviation: "SGB XI", Title: "Sozialgesetzbuch XI",
+			GIIPath: "sgb_11", GIIURL: "https://www.gesetze-im-internet.de/sgb_11/",
+		},
+		{
+			ID: "pbav2025", Abbreviation: "PBAV 2025",
+			Title:   "Pflegeberufe-Ausbildungs- und Prüfungsverordnung",
+			GIIPath: "pbav_2025", GIIURL: "https://www.gesetze-im-internet.de/pbav_2025/",
+		},
+	}
+	if err := svc.Store.UpsertLaws(laws); err != nil {
+		t.Fatal(err)
+	}
+	catalogLaws, _ := svc.Store.ListLaws()
+	variants, _ := svc.Store.ListVariants()
+	svc.Search.Swap(catalogLaws, variants)
+
+	now := time.Now().UTC()
+	seedSyncFreshMeta(t, svc, now)
+
+	parentStand := citation.Parse("sgb11", "Zuletzt geändert durch Art. 1 G v. 20.12.2024 BGBl. 2024 I Nr. 400")
+	if !parentStand.ParseOK {
+		t.Fatalf("parent stand parse failed: %+v", parentStand)
+	}
+	if err := svc.Store.UpsertStand(parentStand); err != nil {
+		t.Fatal(err)
+	}
+	childStand := citation.Parse("pbav2025", "BGBl. 2024 I Nr. 446")
+	if !childStand.ParseOK {
+		t.Fatalf("child stand parse failed: %+v", childStand)
+	}
+	if err := svc.Store.UpsertStand(childStand); err != nil {
+		t.Fatal(err)
+	}
+
+	meta, err := svc.Freshness(context.Background(), "sgb11", IncludeOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.State != domain.FreshnessConfirmedCurrent {
+		t.Fatalf("want confirmed_current; got %s (%s) refs=%+v", meta.State, meta.Rationale, meta.InstrumentRefs)
+	}
+	if meta.Rationale == "unresolved_linked_instrument_refs" {
+		t.Fatalf("rationale must not be unresolved_linked_instrument_refs; refs=%+v", meta.InstrumentRefs)
+	}
+	if len(meta.LinkedInstruments) != 1 || meta.LinkedInstruments[0].GIISlug != "pbav_2025" {
+		t.Fatalf("want [pbav_2025], got %+v", meta.LinkedInstruments)
+	}
+}
+
+func TestIntegration_unmatchedOperativeV_uncertain(t *testing.T) {
+	mt := httpmock.New()
+	svc := newTestService(t, mt)
+	seedCatalog(t, svc, mt)
+	// No TSV / seeded linked instruments.
+
+	law := domain.Law{
+		ID: "arbzg", Abbreviation: "ArbZG", Title: "Arbeitszeitgesetz",
+		GIIPath: "arbzg", GIIURL: "https://www.gesetze-im-internet.de/arbzg/",
+	}
+	if err := svc.Store.UpsertLaws([]domain.Law{law}); err != nil {
+		t.Fatal(err)
+	}
+	laws, _ := svc.Store.ListLaws()
+	variants, _ := svc.Store.ListVariants()
+	svc.Search.Swap(laws, variants)
+
+	now := time.Now().UTC()
+	seedSyncFreshMeta(t, svc, now)
+
+	stand := citation.Parse("arbzg", "Zuletzt geändert durch Art. 1 G v. 20.7.2022 BGBl. 2022 I Nr. 1170")
+	if !stand.ParseOK {
+		t.Fatalf("stand parse failed: %+v", stand)
+	}
+	if err := svc.Store.UpsertStand(stand); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Store.SetMeta("editorial:arbzg", "§ 1 V v. 1.1.2025 I Nr. 999"); err != nil {
+		t.Fatal(err)
+	}
+
+	meta, err := svc.Freshness(context.Background(), "arbzg", IncludeOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.State != domain.FreshnessUncertain {
+		t.Fatalf("want uncertain; got %s (%s)", meta.State, meta.Rationale)
+	}
+	if meta.Rationale != "unresolved_linked_instrument_refs" {
+		t.Fatalf("rationale=%q want unresolved_linked_instrument_refs", meta.Rationale)
 	}
 }
 

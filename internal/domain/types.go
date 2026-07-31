@@ -56,6 +56,16 @@ type InstrumentRef struct {
 	Raw         string `json:"raw,omitempty"`
 }
 
+// VRefResolution records how an operative instrument ref was matched to linked children.
+type VRefResolution struct {
+	Ref            InstrumentRef `json:"ref"`
+	MatchedGIISlug string        `json:"matched_gii_slug,omitempty"`
+	MatchMethod    string        `json:"match_method,omitempty"` // notes_identity | bgbl_index | ""
+	ChildConfirmed bool          `json:"child_confirmed,omitempty"`
+	Resolved       bool          `json:"resolved,omitempty"`
+	Historical     bool          `json:"historical,omitempty"` // past-chain only (non-V); ignore for unresolved
+}
+
 // LinkedInstrument maps a parent law to a related ordinance/instrument (seeded TSV).
 type LinkedInstrument struct {
 	ParentLawID   string `json:"parent_law_id"`

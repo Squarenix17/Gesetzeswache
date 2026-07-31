@@ -163,6 +163,41 @@ func TestReconcile_updatesFreshness(t *testing.T) {
 	}
 }
 
+func TestReconcile_ensuresLinkedLawStubsForVRefProof(t *testing.T) {
+	mt := httpmock.New()
+	o := newTestOrchestrator(t, mt)
+	cat, err := instruments.LoadTSV(filepath.Join("..", "..", "variants", "linked_instruments.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.Instruments = cat
+	if err := o.Store.UpsertLaws([]domain.Law{{
+		ID: "milog", Abbreviation: "MiLoG", Title: "Mindestlohngesetz",
+		GIIPath: "milog", GIIURL: "https://www.gesetze-im-internet.de/milog/",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	laws, _ := o.Store.ListLaws()
+	o.Search.Swap(laws, nil)
+	now := time.Now().UTC()
+	_ = o.Store.SetMetaTime("last_toc_success", now)
+	_ = o.Store.SetMetaTime("last_gii_feed_success", now)
+	_ = o.Store.SetMetaTime("last_bgbl_feed_success", now)
+	stand := citation.Parse("milog", "Zuletzt geändert durch Art. 8 Abs. 3 G v. 12.5.2026 I Nr. 137")
+	if err := o.Store.UpsertStand(stand); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := o.Store.GetLaw("milov5"); !ok {
+		t.Fatal("expected milov5 stub ensured during reconcile V-ref proof")
+	}
+	if _, ok, _ := o.Store.GetFreshness("milog"); !ok {
+		t.Fatal("expected milog freshness record after reconcile")
+	}
+}
+
 func TestRunGIIFeed_ingestsItems(t *testing.T) {
 	mt := httpmock.New()
 	mt.SetBytes("www.gesetze-im-internet.de", "/aktuDienst-rss-feed.xml", fixtures.MustRead("gii_feed.xml"))

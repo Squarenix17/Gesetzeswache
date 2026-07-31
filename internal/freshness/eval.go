@@ -18,6 +18,7 @@ type Input struct {
 	InstrumentRefs             []domain.InstrumentRef      // from Stand / +++ notes
 	InstrumentIssues           []domain.GazetteIssue       // store issues matching InstrumentRefs
 	HasSeededLinkedInstruments bool                        // seeded TSV and/or high-confidence discovered linked instruments
+	VRefResolutions            []domain.VRefResolution     // nil = legacy blunt path; non-nil = proof-aware
 	LinksReadFailed            bool                        // LinksForLaw or DiscoveredForParent store read failed → fail closed
 	LastTOCSuccess             time.Time
 	LastGIIFeedSuccess         time.Time
@@ -189,34 +190,105 @@ func unresolvedInstrumentRefs(in Input) bool {
 	if len(in.InstrumentRefs) == 0 {
 		return false
 	}
+	if in.VRefResolutions == nil {
+		return unresolvedInstrumentRefsBlunt(in)
+	}
+	return unresolvedInstrumentRefsProof(in)
+}
+
+// unresolvedInstrumentRefsBlunt is the legacy fail-closed path when VRefResolutions is nil.
+func unresolvedInstrumentRefsBlunt(in Input) bool {
 	for _, ref := range in.InstrumentRefs {
 		if ref.Year == 0 || (ref.Number == "" && ref.Teil == 0) {
 			continue
 		}
-		// Same citation as Stand → reflected
-		if in.Stand.ParseOK &&
-			in.Stand.Year == ref.Year &&
-			in.Stand.Teil == ref.Teil &&
-			in.Stand.Number == ref.Number {
+		if standReflectsRef(in.Stand, ref) {
 			continue
 		}
-		// Operative amendment-by-reference: Verordnung always fail-closes.
-		// Bare Bekanntmachung on mass codes is editorial history (like G) — ignore.
-		// Section-scoped BEK still fail-closes (operative pointer).
-		kind := strings.ToUpper(ref.Kind)
-		if kind == "V" {
+		if isOperativeInstrumentRef(ref, in.HasSeededLinkedInstruments) {
 			return true
 		}
-		if kind == "BEK" && strings.TrimSpace(ref.SectionHint) != "" {
-			return true
-		}
-		// Seeded parent→instrument laws: empty-Kind / bare BEK notes from TSV still fail closed.
-		if in.HasSeededLinkedInstruments {
-			return true
-		}
-		// Kind G, empty, or bare BEK: mass-code editorial / in-law cross-refs — ignore.
 	}
 	return false
+}
+
+// unresolvedInstrumentRefsProof uses computed V-ref resolutions (Proof Model C).
+func unresolvedInstrumentRefsProof(in Input) bool {
+	for _, ref := range in.InstrumentRefs {
+		if ref.Year == 0 || (ref.Number == "" && ref.Teil == 0) {
+			continue
+		}
+		if standReflectsRef(in.Stand, ref) {
+			continue
+		}
+		if !isOperativeInstrumentRef(ref, in.HasSeededLinkedInstruments) {
+			continue
+		}
+		res, ok := findVRefResolution(in.VRefResolutions, ref)
+		if !ok {
+			return true
+		}
+		if res.Historical {
+			continue
+		}
+		// Require both flags so Resolved alone cannot upgrade without child proof.
+		if res.Resolved && res.ChildConfirmed {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func standReflectsRef(stand domain.StandCitation, ref domain.InstrumentRef) bool {
+	return stand.ParseOK &&
+		stand.Year == ref.Year &&
+		stand.Teil == ref.Teil &&
+		stand.Number == ref.Number
+}
+
+func isOperativeInstrumentRef(ref domain.InstrumentRef, hasSeeded bool) bool {
+	kind := strings.ToUpper(strings.TrimSpace(ref.Kind))
+	switch kind {
+	case "G":
+		return false
+	case "V":
+		return true
+	case "BEK":
+		if strings.TrimSpace(ref.SectionHint) != "" {
+			return true
+		}
+		return hasSeeded
+	default:
+		return hasSeeded && kind == ""
+	}
+}
+
+func findVRefResolution(resolutions []domain.VRefResolution, ref domain.InstrumentRef) (domain.VRefResolution, bool) {
+	for _, res := range resolutions {
+		if refIdentityEqual(res.Ref, ref) {
+			return res, true
+		}
+	}
+	return domain.VRefResolution{}, false
+}
+
+func refIdentityEqual(a, b domain.InstrumentRef) bool {
+	if a.Year != b.Year || a.Number != b.Number {
+		return false
+	}
+	if a.Teil != 0 && b.Teil != 0 && a.Teil != b.Teil {
+		return false
+	}
+	ak := strings.ToUpper(strings.TrimSpace(a.Kind))
+	bk := strings.ToUpper(strings.TrimSpace(b.Kind))
+	if ak != bk {
+		return false
+	}
+	if strings.TrimSpace(a.SectionHint) != strings.TrimSpace(b.SectionHint) {
+		return false
+	}
+	return true
 }
 
 func lowerConfidence(c string) string {

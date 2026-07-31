@@ -529,6 +529,38 @@ func (o *Orchestrator) Reconcile(ctx context.Context) error {
 		operativeLinked := instruments.FilterOperativeLinked(o.Store, linked)
 		instrRefs, instrIssues := instruments.CollectEvidence(o.Store, operativeLinked, law.ID, stand)
 		hasLinked := len(operativeLinked) > 0 || discErr != nil
+		annotated := instruments.AnnotateChain(operativeLinked, now)
+		for _, li := range annotated {
+			slug := strings.TrimSpace(li.GIISlug)
+			if slug == "" {
+				continue
+			}
+			if _, _, err := instruments.EnsureLawFromSlug(o.Store, o.CFG.GIIBase, slug); err != nil && o.Log != nil {
+				o.Log.Warn("ensure linked law stub on reconcile", "slug", slug, "err", err)
+			}
+		}
+		proofCtx := instruments.VRefProofContext{
+			Now:                now,
+			MaxAge:             o.CFG.FreshnessMaxAge,
+			LastTOCSuccess:     tocT,
+			LastGIIFeedSuccess: giiT,
+			LastBGBlSuccess:    bgblSuccess,
+			BGBlFromProbeOnly:  probeOnly,
+			LinksReadFailed:    linksErr != nil || discErr != nil,
+		}
+		var index instruments.BGBlIndexLookup
+		if o.Store != nil {
+			index = instruments.StoreBGBlIndex{
+				Lookup: func(teil, year int, number string) (string, string, bool) {
+					e, ok, err := o.Store.LookupBGBlIndex(teil, year, number)
+					if err != nil || !ok {
+						return "", "", false
+					}
+					return e.GIISlug, e.LawID, true
+				},
+			}
+		}
+		vrefResolutions := instruments.ProveVRefResolutions(instrRefs, annotated, stand, o.Store, index, o.Store, proofCtx)
 		rec := freshness.Evaluate(freshness.Input{
 			LawID:                      law.ID,
 			Stand:                      stand,
@@ -537,6 +569,7 @@ func (o *Orchestrator) Reconcile(ctx context.Context) error {
 			InstrumentRefs:             instrRefs,
 			InstrumentIssues:           instrIssues,
 			HasSeededLinkedInstruments: hasLinked,
+			VRefResolutions:            vrefResolutions,
 			LinksReadFailed:            linksErr != nil || discErr != nil,
 			LastTOCSuccess:             tocT,
 			LastGIIFeedSuccess:         giiT,

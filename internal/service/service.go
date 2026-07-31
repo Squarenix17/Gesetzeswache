@@ -199,6 +199,28 @@ func (s *Service) freshnessFor(lawID string, opts IncludeOpts) (FreshnessMeta, e
 	if opts.Linked {
 		linked = s.attachLinkedPointers(linked)
 	}
+	proofCtx := instruments.VRefProofContext{
+		Now:                now,
+		MaxAge:             s.CFG.FreshnessMaxAge,
+		LastTOCSuccess:     tocT,
+		LastGIIFeedSuccess: giiT,
+		LastBGBlSuccess:    bgbl,
+		BGBlFromProbeOnly:  probeOnly,
+		LinksReadFailed:    linksErr != nil || discErr != nil,
+	}
+	var index instruments.BGBlIndexLookup
+	if s.Store != nil {
+		index = instruments.StoreBGBlIndex{
+			Lookup: func(teil, year int, number string) (string, string, bool) {
+				e, ok, err := s.Store.LookupBGBlIndex(teil, year, number)
+				if err != nil || !ok {
+					return "", "", false
+				}
+				return e.GIISlug, e.LawID, true
+			},
+		}
+	}
+	vrefResolutions := instruments.ProveVRefResolutions(instrRefs, seeded, stand, s.Store, index, s.Store, proofCtx)
 	rec := freshness.Evaluate(freshness.Input{
 		LawID:                      lawID,
 		Stand:                      stand,
@@ -207,6 +229,7 @@ func (s *Service) freshnessFor(lawID string, opts IncludeOpts) (FreshnessMeta, e
 		InstrumentRefs:             instrRefs,
 		InstrumentIssues:           instrIssues,
 		HasSeededLinkedInstruments: hasLinked,
+		VRefResolutions:            vrefResolutions,
 		LinksReadFailed:            linksErr != nil || discErr != nil,
 		LastTOCSuccess:             tocT,
 		LastGIIFeedSuccess:         giiT,

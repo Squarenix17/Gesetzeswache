@@ -196,10 +196,6 @@ func appendUniqueLaw(in []domain.Law, l domain.Law) []domain.Law {
 	return append(in, l)
 }
 
-func isSGBBookLaw(l domain.Law) bool {
-	return sgbBookNumber(l) > 0
-}
-
 func sgbBookNumber(l domain.Law) int {
 	// Prefer abbreviation (handles year-suffixed ids like sgb92018 + "SGB IX").
 	if n, ok := normalize.ParseSGBBookQuery(l.Abbreviation); ok {

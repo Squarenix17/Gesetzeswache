@@ -66,13 +66,18 @@ jobs:
         run: |
           IMAGE=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')
           SHORT_SHA=$(echo "${SHORT_SHA}" | cut -c1-7)
-          docker build -t "${IMAGE}:latest" .
+          VERSION=$(tr -d '[:space:]' < VERSION)
+          docker build --build-arg "VERSION=${VERSION}" -t "${IMAGE}:latest" .
           if [ "${EVENT_NAME}" = "push" ]; then
             docker tag "${IMAGE}:latest" "${IMAGE}:sha-${SHORT_SHA}"
+            docker tag "${IMAGE}:latest" "${IMAGE}:${VERSION}"
             docker push "${IMAGE}:latest"
             docker push "${IMAGE}:sha-${SHORT_SHA}"
+            docker push "${IMAGE}:${VERSION}"
           fi
           if [ "${EVENT_NAME}" = "release" ]; then
             docker tag "${IMAGE}:latest" "${IMAGE}:${TAG}"
+            docker tag "${IMAGE}:latest" "${IMAGE}:${VERSION}"
             docker push "${IMAGE}:${TAG}"
+            docker push "${IMAGE}:${VERSION}"
           fi

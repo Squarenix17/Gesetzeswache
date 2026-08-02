@@ -352,7 +352,7 @@ More sync intervals and source URLs: [`.env.example`](.env.example), [`internal/
 
 ### Docker
 
-Published image: `ghcr.io/squarenix17/gesetzeswache:latest` and version tags such as `ghcr.io/squarenix17/gesetzeswache:0.5.1` (pinned tags on [releases](https://github.com/Squarenix17/gesetzeswache/releases)).
+Published image: `ghcr.io/squarenix17/gesetzeswache:latest`, semver tags such as `ghcr.io/squarenix17/gesetzeswache:0.5.1`, and release tags such as `ghcr.io/squarenix17/gesetzeswache:v0.5.1` (see repo-root [`VERSION`](VERSION) and [releases](https://github.com/Squarenix17/gesetzeswache/releases)). The binary inside the image reports the same semver via `gew version` (without the `v` prefix).
 
 The image includes a `HEALTHCHECK` via `gew health`. Kubernetes can keep using `/healthz` and `/readyz`.
 
@@ -360,12 +360,26 @@ The image includes a `HEALTHCHECK` via `gew health`. Kubernetes can keep using `
 
 ```bash
 export GEW_SHARED_SECRET="$(openssl rand -hex 32)"
+export GEW_VERSION="$(tr -d '[:space:]' < VERSION)"
 # Persist the secret so restarts keep the same value:
 #   echo "GEW_SHARED_SECRET=$GEW_SHARED_SECRET" > .env
 
 docker compose up -d --build
 curl http://127.0.0.1:8081/readyz
-docker run --rm gesetzeswache:0.5.1 version   # expect 0.5.1
+docker run --rm "gesetzeswache:${GEW_VERSION}" version   # expect same as VERSION file
+```
+
+**Manual build/push** (when Docker Desktop is healthy):
+
+```bash
+export IMAGE=ghcr.io/squarenix17/gesetzeswache
+export VERSION=$(tr -d '[:space:]' < VERSION)
+docker build --build-arg "VERSION=${VERSION}" -t "${IMAGE}:latest" .
+docker tag "${IMAGE}:latest" "${IMAGE}:v${VERSION}"
+docker tag "${IMAGE}:latest" "${IMAGE}:${VERSION}"
+docker push "${IMAGE}:v${VERSION}"
+docker push "${IMAGE}:${VERSION}"
+docker push "${IMAGE}:latest"
 ```
 
 The checked-in [`docker-compose.yml`](docker-compose.yml) maps **host `8081` → container `8080`** so it does not collide with another service already on 8080. Adjust the left-hand port if needed.

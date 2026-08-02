@@ -37,7 +37,8 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           out="gew_${GOOS}_${GOARCH}"
-          go build -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "${out}" ./cmd/gesetzeswache
+          VERSION=$(tr -d '[:space:]' < VERSION)
+          go build -ldflags="-s -w -X main.version=${VERSION}" -o "${out}" ./cmd/gesetzeswache
           sha256sum "${out}" >> "SHA256SUMS-${{ matrix.goarch }}"
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

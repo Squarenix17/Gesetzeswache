@@ -229,7 +229,7 @@ func TestGolden_ExportBGB_hierarchical(t *testing.T) {
 </dokument>`)
 	mt.SetBytes("www.gesetze-im-internet.de", "/bgb/xml.zip", fixtures.MustZipXML("bgb.xml", xmlBody))
 
-	res, err := svc.ExportText(context.Background(), "bgb", []string{export.FormatHierarchical}, IncludeOpts{})
+	res, err := svc.ExportText(context.Background(), "bgb", []string{export.FormatHierarchical}, IncludeOpts{}, ExportGateOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}

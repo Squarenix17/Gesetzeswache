@@ -9,7 +9,7 @@ import (
 func TestResolveExactAbbr(t *testing.T) {
 	e := NewEngine()
 	e.Swap([]domain.Law{{ID: "bgb", Abbreviation: "BGB", Title: "Bürgerliches Gesetzbuch", GIIPath: "bgb"}}, nil)
-	best, _ := e.Current().Resolve("BGB", 0.75)
+	best, _, _ := e.Current().Resolve("BGB", 0.75)
 	if best == nil || best.Law.ID != "bgb" {
 		t.Fatalf("expected bgb, got %+v", best)
 	}
@@ -18,7 +18,7 @@ func TestResolveExactAbbr(t *testing.T) {
 func TestResolveTypo(t *testing.T) {
 	e := NewEngine()
 	e.Swap([]domain.Law{{ID: "bgb", Abbreviation: "BGB", Title: "Bürgerliches Gesetzbuch"}}, nil)
-	best, sug := e.Current().Resolve("BGBX", 0.75)
+	best, sug, _ := e.Current().Resolve("BGBX", 0.75)
 	if best == nil {
 		// may fall to suggestions depending on score
 		if len(sug) == 0 {
@@ -30,7 +30,7 @@ func TestResolveTypo(t *testing.T) {
 func TestResolveBelowThreshold(t *testing.T) {
 	e := NewEngine()
 	e.Swap([]domain.Law{{ID: "bgb", Abbreviation: "BGB", Title: "Bürgerliches Gesetzbuch"}}, nil)
-	best, sug := e.Current().Resolve("zzzznotalaw", 0.75)
+	best, sug, _ := e.Current().Resolve("zzzznotalaw", 0.75)
 	if best != nil {
 		t.Fatalf("expected no best, got %+v", best)
 	}
@@ -43,7 +43,7 @@ func TestVariant(t *testing.T) {
 		[]domain.Law{{ID: "bgb", Abbreviation: "BGB", Title: "Bürgerliches Gesetzbuch"}},
 		[]domain.LawVariant{{Variant: "Zivilgesetzbuch", LawID: "bgb"}},
 	)
-	best, _ := e.Current().Resolve("Zivilgesetzbuch", 0.75)
+	best, _, _ := e.Current().Resolve("Zivilgesetzbuch", 0.75)
 	if best == nil || best.Law.ID != "bgb" {
 		t.Fatalf("variant failed: %+v", best)
 	}
@@ -61,7 +61,7 @@ func TestResolveSGB9_variantBeatsSubstring(t *testing.T) {
 			{Variant: "SGB 9", LawID: "sgb92018"},
 		},
 	)
-	best, _ := e.Current().Resolve("sgb9", 0.75)
+	best, _, _ := e.Current().Resolve("sgb9", 0.75)
 	if best == nil || best.Law.ID != "sgb92018" {
 		t.Fatalf("expected sgb92018 via variant, got %+v", best)
 	}
@@ -75,7 +75,7 @@ func TestResolveDSGVO_noFalseSubstringMatch(t *testing.T) {
 		},
 		nil,
 	)
-	best, sug := e.Current().Resolve("dsgvo", 0.75)
+	best, sug, _ := e.Current().Resolve("dsgvo", 0.75)
 	if best != nil {
 		t.Fatalf("dsgvo must not match s_g via sg substring; got %+v", best)
 	}
@@ -91,7 +91,7 @@ func TestResolveVariantSGBXI(t *testing.T) {
 		},
 		[]domain.LawVariant{{Variant: "SGB XI", LawID: "sgb11"}},
 	)
-	best, _ := e.Current().Resolve("SGB XI", 0.75)
+	best, _, _ := e.Current().Resolve("SGB XI", 0.75)
 	if best == nil || best.Law.ID != "sgb11" {
 		t.Fatalf("expected sgb11, got %+v", best)
 	}

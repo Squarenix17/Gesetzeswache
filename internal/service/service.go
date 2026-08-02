@@ -44,9 +44,10 @@ type Service struct {
 
 // Envelope is the API response shape.
 type Envelope struct {
-	Success bool    `json:"success"`
-	Data    any     `json:"data"`
-	Error   *string `json:"error"`
+	Success   bool    `json:"success"`
+	Data      any     `json:"data"`
+	Error     *string `json:"error"`
+	ErrorCode *string `json:"error_code,omitempty"`
 }
 
 type Suggestion struct {
@@ -58,6 +59,7 @@ type Suggestion struct {
 
 type FreshnessMeta struct {
 	State             domain.FreshnessState     `json:"state"`
+	SafeToServe       bool                      `json:"safe_to_serve"`
 	Confidence        string                    `json:"confidence"`
 	Method            domain.VerificationMethod `json:"method"`
 	EvaluatedAt       time.Time                 `json:"evaluated_at"`
@@ -70,11 +72,13 @@ type FreshnessMeta struct {
 	BGBlPointers      []string                  `json:"bgbl_pointers,omitempty"`
 	LinkedInstruments []domain.LinkedInstrument `json:"linked_instruments,omitempty"`
 	InstrumentRefs    []domain.InstrumentRef    `json:"instrument_refs,omitempty"`
+	UnresolvedRefs    []freshness.UnresolvedInstrumentRef `json:"unresolved_refs,omitempty"`
 	Proof             []domain.VRefResolution   `json:"proof,omitempty"`
 }
 
 type ResolveResult struct {
 	Matched     bool           `json:"matched"`
+	Ambiguous   bool           `json:"ambiguous,omitempty"`
 	Law         *domain.Law    `json:"law,omitempty"`
 	Score       float64        `json:"score,omitempty"`
 	Freshness   *FreshnessMeta `json:"freshness,omitempty"`
@@ -95,12 +99,16 @@ func (s *Service) Resolve(ctx context.Context, query string, opts IncludeOpts) (
 	if snap == nil || len(mustLaws(s)) == 0 {
 		return ResolveResult{Threshold: s.CFG.MatchThreshold}, fmt.Errorf("catalog not ready")
 	}
-	best, sug := snap.Resolve(query, s.CFG.MatchThreshold)
-	out := ResolveResult{Threshold: s.CFG.MatchThreshold}
+	best, sug, ambiguous := snap.Resolve(query, s.CFG.MatchThreshold)
+	out := ResolveResult{Threshold: s.CFG.MatchThreshold, Ambiguous: ambiguous}
 	for _, c := range sug {
 		out.Suggestions = append(out.Suggestions, Suggestion{
 			ID: c.Law.ID, Abbreviation: c.Law.Abbreviation, Title: c.Law.Title, Score: c.Score,
 		})
+	}
+	if ambiguous {
+		out.Matched = false
+		return out, nil
 	}
 	if best == nil {
 		// Direct id / seeded slug lookup (stubs may exist before search ranking knows them).
@@ -146,7 +154,7 @@ func (s *Service) Freshness(ctx context.Context, lawID string, opts IncludeOpts)
 	}
 	// allow abbreviation resolve
 	if _, ok, _ := s.Store.GetLaw(lawID); !ok {
-		if best, _ := s.Search.Current().Resolve(lawID, s.CFG.MatchThreshold); best != nil {
+		if best, _, _ := s.Search.Current().Resolve(lawID, s.CFG.MatchThreshold); best != nil {
 			lawID = best.Law.ID
 		}
 	}
@@ -222,7 +230,7 @@ func (s *Service) freshnessFor(lawID string, opts IncludeOpts) (FreshnessMeta, e
 		}
 	}
 	vrefResolutions := instruments.ProveVRefResolutions(instrRefs, seeded, stand, s.Store, index, s.Store, proofCtx)
-	rec := freshness.Evaluate(freshness.Input{
+	evalInput := freshness.Input{
 		LawID:                      lawID,
 		Stand:                      stand,
 		LinkedIssues:               issues,
@@ -238,10 +246,12 @@ func (s *Service) freshnessFor(lawID string, opts IncludeOpts) (FreshnessMeta, e
 		BGBlFromProbeOnly:          probeOnly,
 		Now:                        now,
 		MaxAge:                     s.CFG.FreshnessMaxAge,
-	})
+	}
+	rec := freshness.Evaluate(evalInput)
 	_ = s.Store.PutFreshness(rec)
 	meta := FreshnessMeta{
 		State:             rec.State,
+		SafeToServe:       rec.State == domain.FreshnessConfirmedCurrent,
 		Confidence:        rec.Confidence,
 		Method:            rec.Method,
 		EvaluatedAt:       rec.EvaluatedAt,
@@ -252,6 +262,7 @@ func (s *Service) freshnessFor(lawID string, opts IncludeOpts) (FreshnessMeta, e
 		BGBlPointers:      pointers,
 		LinkedInstruments: linked,
 		InstrumentRefs:    instrRefs,
+		UnresolvedRefs:    freshness.CollectUnresolvedRefs(evalInput),
 	}
 	if !tocT.IsZero() {
 		meta.LastTOCSuccess = &tocT
@@ -403,101 +414,6 @@ var ErrLawNotFound = errors.New("law not found")
 // ErrRecheckTimeout is returned when ForceRecheck exceeds its context deadline.
 var ErrRecheckTimeout = errors.New("recheck timed out")
 
-func (s *Service) ForceRecheck(ctx context.Context, lawID string) error {
-	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("%w: %w", ErrRecheckTimeout, err)
-	}
-	lawID = strings.TrimSpace(lawID)
-	if lawID != "" {
-		if err := validateQueryLength(lawID); err != nil {
-			return err
-		}
-		if _, ok, err := s.Store.GetLaw(lawID); err != nil {
-			return err
-		} else if !ok {
-			var resolved bool
-			if snap := s.Search.Current(); snap != nil {
-				if best, _ := snap.Resolve(lawID, s.CFG.MatchThreshold); best != nil {
-					lawID = best.Law.ID
-					resolved = true
-				}
-			}
-			if !resolved {
-				return ErrLawNotFound
-			}
-		}
-	}
-	if err := s.Sync.RunGIIFeed(ctx); err != nil {
-		if err := recheckCtxExpired(ctx); err != nil {
-			return err
-		}
-		s.Log.Warn("force recheck gii feed", "err", err)
-	}
-	if err := s.Sync.RunBGBlFeeds(ctx); err != nil {
-		if err := recheckCtxExpired(ctx); err != nil {
-			return err
-		}
-		_ = s.Sync.RunELIProbe(ctx)
-	}
-	if lawID != "" {
-		if law, ok, _ := s.Store.GetLaw(lawID); ok {
-			if err := s.Sync.RefreshStandForLaw(ctx, law); err != nil {
-				if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-					return fmt.Errorf("%w: %w", ErrRecheckTimeout, err)
-				}
-			}
-			s.Export.InvalidateLaw(law.ID)
-			// Ensure + refresh all linked children (TSV, family, discovered) for evidence.
-			rows, err := s.linkedInstrumentsFor(lawID)
-			if err != nil && s.Log != nil {
-				s.Log.Warn("linked instruments on recheck", "law", lawID, "err", err)
-			}
-			ensured := map[string]struct{}{}
-			refreshedIndex := false
-			for _, li := range rows {
-				slug := strings.TrimSpace(li.GIISlug)
-				if slug == "" {
-					continue
-				}
-				if _, done := ensured[slug]; done {
-					continue
-				}
-				ensured[slug] = struct{}{}
-				if _, neu, err := instruments.EnsureLawFromSlug(s.Store, s.CFG.GIIBase, slug); err != nil {
-					if s.Log != nil {
-						s.Log.Warn("ensure linked child on recheck", "law", lawID, "slug", slug, "err", err)
-					}
-					continue
-				} else if neu {
-					refreshedIndex = true
-				}
-				childID := normalize.Key(slug)
-				if li.LawID != "" {
-					childID = normalize.Key(li.LawID)
-				}
-				if child, ok, _ := s.Store.GetLaw(childID); ok {
-					if err := s.Sync.RefreshStandForLaw(ctx, child); err != nil {
-						if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-							return fmt.Errorf("%w: %w", ErrRecheckTimeout, err)
-						}
-					}
-					s.Export.InvalidateLaw(child.ID)
-				}
-			}
-			if refreshedIndex {
-				s.refreshSearchIndex()
-			}
-		}
-	}
-	if err := s.Sync.Reconcile(ctx); err != nil {
-		if err := recheckCtxExpired(ctx); err != nil {
-			return err
-		}
-		return err
-	}
-	return recheckCtxExpired(ctx)
-}
-
 func recheckCtxExpired(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("%w: %w", ErrRecheckTimeout, err)
@@ -626,7 +542,7 @@ type ExportResult struct {
 	UnitIDs             []string       `json:"unit_ids,omitempty"`
 }
 
-func (s *Service) ExportText(ctx context.Context, queryOrID string, formats []string, opts IncludeOpts) (ExportResult, error) {
+func (s *Service) ExportText(ctx context.Context, queryOrID string, formats []string, opts IncludeOpts, gate ExportGateOpts) (ExportResult, error) {
 	queryOrID = strings.TrimSpace(queryOrID)
 	if err := validateQueryLength(queryOrID); err != nil {
 		return ExportResult{}, err
@@ -656,17 +572,17 @@ func (s *Service) ExportText(ctx context.Context, queryOrID string, formats []st
 			if err2 != nil {
 				return ExportResult{}, err2
 			}
-			return s.exportLaw(ctx, law, meta, formats, opts)
+			return s.exportLaw(ctx, law, meta, formats, opts, gate)
 		}
 		return ExportResult{}, err
 	}
 	if !res.Matched || res.Law == nil {
 		return ExportResult{Matched: false, Suggestions: res.Suggestions}, nil
 	}
-	return s.exportLaw(ctx, *res.Law, *res.Freshness, formats, opts)
+	return s.exportLaw(ctx, *res.Law, *res.Freshness, formats, opts, gate)
 }
 
-func (s *Service) exportLaw(ctx context.Context, law domain.Law, meta FreshnessMeta, formats []string, opts IncludeOpts) (ExportResult, error) {
+func (s *Service) exportLaw(ctx context.Context, law domain.Law, meta FreshnessMeta, formats []string, opts IncludeOpts, gate ExportGateOpts) (ExportResult, error) {
 	stand := domain.StandCitation{}
 	if meta.Stand != nil {
 		stand = *meta.Stand
@@ -719,7 +635,7 @@ func (s *Service) exportLaw(ctx context.Context, law domain.Law, meta FreshnessM
 		}
 	}
 
-	if s.CFG.RefuseExportStale && meta.State == domain.FreshnessConfirmedStale {
+	if s.CFG.RefuseExportStale && !gate.AllowStale && meta.State == domain.FreshnessConfirmedStale {
 		return ExportResult{}, fmt.Errorf("export refused: law confirmed_stale")
 	}
 

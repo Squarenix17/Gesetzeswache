@@ -79,13 +79,14 @@ It syncs a lightweight catalog from [Gesetze im Internet](https://www.gesetze-im
 
 These are intentional or known behaviours — they are easy to misread as bugs:
 
-1. **`uncertain` is normal for some laws.** Parents with linked ordinances (e.g. MiLoG) stay `uncertain` until each operative citation is proven against a current linked child that is itself `confirmed_current`. Bare editorial `Bek.` cites without a section hint are ignored; section-scoped `Bek.` and Kind `V` still require proof. That is fail-closed behaviour, not a failed lookup. Sync can still be healthy while a law is `uncertain`.
-2. **Freshness is a contract, not decoration.** Do not index or serve text as “current” unless freshness (or for bundles, `bundle_freshness.safe_to_serve`) allows it.
+1. **`uncertain` is normal for some laws.** Parents with linked ordinances (e.g. MiLoG) stay `uncertain` until each operative citation is proven against a current linked child that is itself `confirmed_current`. Bare editorial `Bek.` cites without a section hint are ignored for the *uncertain* path and also **do not** drive `confirmed_stale` / `newer_issue_ids` (same for feed-linked titles that are bare Bekanntmachungen). Section-scoped `Bek.`, Kind `V`, and amending Kind `G` still can. That is fail-closed behaviour, not a failed lookup. Sync can still be healthy while a law is `uncertain`.
+2. **Freshness is a contract, not decoration.** Do not index or serve text as “current” unless freshness (or for bundles, `bundle_freshness.safe_to_serve`) allows it. `profile=ingest` / `allow_stale` only skip export refusal — they never flip `safe_to_serve` to true.
 3. **Linked Verordnungen are not the same as parent §§.** MiLoV5 § 2 is not MiLoG § 2. Use `section_hint` / `parent_section_hint` as attachment metadata, not as a 1:1 section map.
 4. **CLI and `serve` share one database file.** Do not run both at once against the same `gesetzeswache.db` (lock / timeout errors).
 5. **First sync needs network and time.** Until `/readyz` reports ready, resolve/export may be incomplete. Outbound HTTPS to GII and `recht.bund.de` is required.
 6. **Auto-discovery of linked instruments is best-effort.** High-confidence Ermächtigung links are stored automatically; seeded TSV overrides win on collision. Coverage is incomplete for the full federal corpus.
 7. **HTTP is open by design for trusted networks.** Only `POST /v1/recheck` is authenticated. Do not expose the API on the public internet without TLS, network controls, and rate limits — see [`SECURITY.md`](SECURITY.md).
+8. **Bare SGB book queries prefer book laws.** `SGB V` / `SGB III` resolve to Sozialgesetzbuch book ids (`sgb5`, `sgb3`, …), including GII slug forms (`sgb_5`). Fuzzy VO collisions return `ambiguous: true` + candidates instead of a wrong single hit.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -95,8 +96,10 @@ These are intentional or known behaviours — they are easy to misread as bugs:
 All JSON responses use the same envelope:
 
 ```json
-{ "success": true, "data": { }, "error": null }
+{ "success": true, "data": { }, "error": null, "error_code": null }
 ```
+
+`error_code` is set on structured application errors (optional when null/omitted).
 
 ### Freshness (consumer contract)
 
@@ -108,12 +111,32 @@ All JSON responses use the same envelope:
 
 Rules of thumb:
 
-1. Always read freshness on matched results (`data.freshness.state`, or for bundles/index: `data.bundle_freshness`).
+1. Always read freshness on matched results (`data.freshness.state`, or for bundles/index: `data.bundle_freshness`). Resolve/freshness always emit boolean `safe_to_serve` (`true` only when `confirmed_current`).
 2. For bundles/index, serve as current only when `bundle_freshness.safe_to_serve` is `true` (fail-closed over **all** members).
 3. For vector ingest of amendment-by-reference parents, index **parent and linked ordinances as separate chunks** linked by `parent_section_hint` — do not embed optional `--compose` hierarchical text.
 4. BGBl issue identity is the triple `(teil, year, number)` — never compare issue numbers alone.
+5. When `rationale` is `unresolved_linked_instrument_refs`, inspect `freshness.unresolved_refs[]` (`classification`: `missing_seed` \| `child_not_current` \| `ignored_bare_bek` \| `unmatched` \| `historical`).
 
-Optional: `GEW_REFUSE_EXPORT_STALE=true` makes the server refuse export when a law is `confirmed_stale`.
+Optional: `GEW_REFUSE_EXPORT_STALE=true` makes the server refuse export when a law is `confirmed_stale` (**HTTP 409**, `error_code=export_refused_confirmed_stale`). Override per request with `allow_stale=1` or `profile=ingest` (chunks still carry `safe_to_serve=false` when stale/uncertain).
+
+### Ingest profile and export flags
+
+| Query / body | Effect |
+|--------------|--------|
+| `profile=ingest` | Sets `allow_stale=true` only (does **not** set `parent_only`) |
+| `allow_stale=1\|true` | Skip `GEW_REFUSE_EXPORT_STALE` refusal on export/bundle/index |
+| `parent_only=1\|true` | Export parent only; skip linked VO membership and the operative-bundle size cap |
+| `section=` | Index: filter chunks by parent § / `parent_section_hint` |
+| `include=past\|linked\|proof` | Resolve/bundle membership / proof payload |
+
+CLI mirrors: `--profile=ingest`, `--allow-stale`, `--parent-only`.
+
+### Error codes (application)
+
+| HTTP | `error_code` | When |
+|------|--------------|------|
+| **409** | `export_refused_confirmed_stale` | Refuse-stale enabled and member is `confirmed_stale` (not a proxy crash; previously 502) |
+| **400** | `operative_bundle_too_large` | Linked VO members exceed `GEW_MAX_OPERATIVE_BUNDLE`; `data` includes `{max, actual, members:[…]}` |
 
 ### Which command / endpoint for which job?
 
@@ -146,14 +169,14 @@ Default listen address: `:8080` (Compose maps host **8081** → container 8080 �
 | GET | `/healthz` | Liveness |
 | GET | `/readyz` | Readiness (catalog / sync initialized) |
 | GET | `/metrics` | Prometheus text (unauthenticated) |
-| GET, POST | `/v1/resolve?q=` | Resolve + freshness (`include=past`, `include=linked`) |
-| GET | `/v1/freshness?id=` | Freshness by id or `q=` |
+| GET, POST | `/v1/resolve?q=` | Resolve + freshness (`include=past,linked,proof`; always `safe_to_serve`; SGB aliases) |
+| GET | `/v1/freshness?id=` | Freshness by id or `q=` (cheap dashboard path; no full index payload) |
 | GET | `/v1/stale` | List `confirmed_stale` laws |
 | GET | `/v1/sync/status` | Sync and readiness timestamps |
-| GET, POST | `/v1/export?q=&format=` | `hierarchical` \| `chunked` \| `flat` \| `normtext` |
-| GET, POST | `/v1/bundle?q=&format=` | Parent + current linked Verordnungen (`include=past`, `compose=true`) |
-| GET, POST | `/v1/index?q=` | Flat ingest chunks (`section=§1,§2`, `include=past`) |
-| POST | `/v1/recheck` | Force re-verification (**auth required**) |
+| GET, POST | `/v1/export?q=&format=` | `hierarchical` \| `chunked` \| `flat` \| `normtext` (`allow_stale`, `profile=ingest`) |
+| GET, POST | `/v1/bundle?q=&format=` | Parent + current linked Verordnungen (`include=past`, `compose=true`, `parent_only`, `allow_stale`, `profile`) |
+| GET, POST | `/v1/index?q=` | Flat ingest chunks (`section=`, `include=past`, `parent_only`, `allow_stale`, `profile=ingest`) |
+| POST | `/v1/recheck` | Force re-verification (**auth required**); returns `changed`, `state_before`/`state_after`, and if still stale/uncertain: `reason`, `newer_issue_ids`, `stand` |
 
 ```bash
 # Replace 8080 with 8081 if using the default docker-compose.yml mapping
@@ -184,6 +207,8 @@ gew bundle MiLoG normtext
 gew bundle --compose MiLoG hierarchical
 gew index MiLoG
 gew index MiLoG --section='§ 1'
+gew index --profile=ingest --parent-only bbig_2005
+gew index --allow-stale zpo
 gew index --include=past MiLoG --section='§ 1,§ 2'
 gew mcp                           # MCP stdio server
 gew health                        # Probe /healthz (container HEALTHCHECK)
@@ -317,7 +342,8 @@ All settings use the `GEW_` prefix. Copy [`.env.example`](.env.example) as a sta
 | `GEW_VARIANTS_PATH` | `variants/variants.tsv` | Informal name → law id |
 | `GEW_LINKED_INSTRUMENTS_PATH` | `variants/linked_instruments.tsv` | Seeded parent→VO links |
 | `GEW_ENABLE_EXPORT` | `true` | Enable on-demand text export / bundle / index |
-| `GEW_REFUSE_EXPORT_STALE` | `false` | Refuse export when law is `confirmed_stale` |
+| `GEW_REFUSE_EXPORT_STALE` | `false` | Refuse export when law is `confirmed_stale` (HTTP 409; override with `allow_stale` / `profile=ingest`) |
+| `GEW_MAX_OPERATIVE_BUNDLE` | `8` | Max linked Verordnungen in one bundle/index (invalid/zero → 8) |
 | `GEW_DISCOVERY_ENABLED` | `true` | Auto-discover parent→Verordnung links |
 | `GEW_DISCOVERY_MAX_PER_CYCLE` | `50` | Max Verordnungen ingested per discovery pass |
 | `GEW_FORTSCHREIBUNG_FAMILIES_PATH` | `variants/fortschreibung_families.tsv` | Fortschreibung slug-prefix families |
@@ -326,7 +352,7 @@ More sync intervals and source URLs: [`.env.example`](.env.example), [`internal/
 
 ### Docker
 
-Published image: `ghcr.io/squarenix17/gesetzeswache:latest` (pinned tags on [releases](https://github.com/Squarenix17/gesetzeswache/releases)).
+Published image: `ghcr.io/squarenix17/gesetzeswache:latest` and version tags such as `ghcr.io/squarenix17/gesetzeswache:0.5.1` (pinned tags on [releases](https://github.com/Squarenix17/gesetzeswache/releases)).
 
 The image includes a `HEALTHCHECK` via `gew health`. Kubernetes can keep using `/healthz` and `/readyz`.
 
@@ -339,6 +365,7 @@ export GEW_SHARED_SECRET="$(openssl rand -hex 32)"
 
 docker compose up -d --build
 curl http://127.0.0.1:8081/readyz
+docker run --rm gesetzeswache:0.5.1 version   # expect 0.5.1
 ```
 
 The checked-in [`docker-compose.yml`](docker-compose.yml) maps **host `8081` → container `8080`** so it does not collide with another service already on 8080. Adjust the left-hand port if needed.

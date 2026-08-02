@@ -247,8 +247,7 @@ func callTool(ctx context.Context, svc *service.Service, name string, args map[s
 	case "list_stale_laws":
 		return svc.ListStale(ctx)
 	case "force_recheck":
-		err := svc.ForceRecheck(ctx, str(args["id"]))
-		return map[string]string{"status": "ok"}, err
+		return svc.ForceRecheck(ctx, str(args["id"]))
 	case "sync_status":
 		return svc.SyncStatus(ctx)
 	case "export_law_text":
@@ -267,7 +266,7 @@ func callTool(ctx context.Context, svc *service.Service, name string, args map[s
 				}
 			}
 		}
-		return svc.ExportText(ctx, str(args["query"]), formats, opts)
+		return svc.ExportText(ctx, str(args["query"]), formats, opts, service.ExportGateOpts{})
 	case "export_law_bundle":
 		var formats []string
 		if v, ok := args["formats"]; ok {

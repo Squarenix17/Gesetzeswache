@@ -189,7 +189,7 @@ func TestIntegration_ExportNormtext(t *testing.T) {
 	xmlBody := fixtures.MustRead("arbzg_snippet.xml")
 	mt.SetBytes("www.gesetze-im-internet.de", "/arbzg/xml.zip", fixtures.MustZipXML("arbzg.xml", xmlBody))
 
-	res, err := svc.ExportText(context.Background(), "ArbZG", []string{export.FormatNormtext}, IncludeOpts{})
+	res, err := svc.ExportText(context.Background(), "ArbZG", []string{export.FormatNormtext}, IncludeOpts{}, ExportGateOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestIntegration_ExportMalformedXML(t *testing.T) {
 	bad := fixtures.MustRead("malformed.xml")
 	mt.SetBytes("www.gesetze-im-internet.de", "/arbzg/xml.zip", fixtures.MustZipXML("bad.xml", bad))
 
-	_, err := svc.ExportText(context.Background(), "ArbZG", []string{export.FormatNormtext}, IncludeOpts{})
+	_, err := svc.ExportText(context.Background(), "ArbZG", []string{export.FormatNormtext}, IncludeOpts{}, ExportGateOpts{})
 	if err == nil {
 		t.Fatal("expected malformed XML error")
 	}
@@ -316,7 +316,7 @@ func TestIntegration_MiLoG_plusPlusVerordnung_notConfirmedCurrent(t *testing.T) 
 	xmlBody := fixtures.MustRead("milog_snippet.xml")
 	mt.SetBytes("www.gesetze-im-internet.de", "/milog/xml.zip", fixtures.MustZipXML("milog.xml", xmlBody))
 
-	res, err := svc.ExportText(context.Background(), "milog", []string{export.FormatNormtext}, IncludeOpts{})
+	res, err := svc.ExportText(context.Background(), "milog", []string{export.FormatNormtext}, IncludeOpts{}, ExportGateOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1132,7 +1132,7 @@ func TestIntegration_MiLoV5_export_fundstelleStand_confirmedCurrent(t *testing.T
 	xmlBody := fixtures.MustRead("milov5_snippet.xml")
 	mt.SetBytes("www.gesetze-im-internet.de", "/milov5/xml.zip", fixtures.MustZipXML("milov5.xml", xmlBody))
 
-	res, err := svc.ExportText(context.Background(), "milov5", []string{export.FormatNormtext}, IncludeOpts{})
+	res, err := svc.ExportText(context.Background(), "milov5", []string{export.FormatNormtext}, IncludeOpts{}, ExportGateOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}

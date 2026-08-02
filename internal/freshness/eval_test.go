@@ -558,3 +558,121 @@ func TestHeuristicLinksLowerConfidence(t *testing.T) {
 		t.Fatalf("confidence=%q want lowered", rec.Confidence)
 	}
 }
+
+func syncFreshInput(lawID string, stand domain.StandCitation, now time.Time) Input {
+	return Input{
+		LawID:              lawID,
+		Stand:              stand,
+		LastTOCSuccess:     now.Add(-time.Hour),
+		LastGIIFeedSuccess: now.Add(-time.Hour),
+		LastBGBlSuccess:    now.Add(-time.Hour),
+		Now:                now,
+		MaxAge:             6 * time.Hour,
+	}
+}
+
+func TestBareBekInstrumentIssueDoesNotConfirmStale(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	in := syncFreshInput("zpo", domain.StandCitation{
+		LawID: "zpo", Year: 2025, Teil: 1, Number: "349", ParseOK: true,
+	}, now)
+	in.InstrumentRefs = []domain.InstrumentRef{{
+		Kind: "BEK", Teil: 1, Year: 2026, Number: "80",
+		Raw: "Bek. v. 1.3.2026 I Nr. 80",
+	}}
+	in.InstrumentIssues = []domain.GazetteIssue{{
+		ID: "BGBl-1/2026/80", Teil: 1, Year: 2026, Number: "80",
+		Title: "Bekanntmachung über die Neufassung der ZPO",
+	}}
+	rec := Evaluate(in)
+	if rec.State == domain.FreshnessConfirmedStale {
+		t.Fatalf("bare Bek InstrumentIssue must not confirm_stale; got %s newer=%v", rec.State, rec.NewerIssueIDs)
+	}
+	if rec.State != domain.FreshnessConfirmedCurrent {
+		t.Fatalf("got %s (%s) want confirmed_current", rec.State, rec.Rationale)
+	}
+}
+
+func TestSectionScopedBekInstrumentIssueConfirmsStale(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	in := syncFreshInput("somelaw", domain.StandCitation{
+		LawID: "somelaw", Year: 2024, Teil: 1, Number: "10", ParseOK: true,
+	}, now)
+	in.InstrumentRefs = []domain.InstrumentRef{{
+		Kind: "BEK", Teil: 1, Year: 2025, Number: "50", SectionHint: "§ 1",
+		Raw: "§ 1 Bek. v. 1.2.2025 I Nr. 50",
+	}}
+	in.InstrumentIssues = []domain.GazetteIssue{{
+		ID: "BGBl-1/2025/50", Teil: 1, Year: 2025, Number: "50",
+	}}
+	rec := Evaluate(in)
+	if rec.State != domain.FreshnessConfirmedStale {
+		t.Fatalf("got %s (%s) want confirmed_stale for section-scoped Bek", rec.State, rec.Rationale)
+	}
+}
+
+func TestAmendingGLinkedIssueStillConfirmsStale(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	in := syncFreshInput("bgb", domain.StandCitation{
+		Year: 2024, Teil: 1, Number: "10", ParseOK: true,
+	}, now)
+	in.LinkedIssues = []domain.GazetteIssue{{
+		ID: "BGBl-1/2025/5", Teil: 1, Year: 2025, Number: "5",
+		Title: "Gesetz zur Änderung des Bürgerlichen Gesetzbuchs",
+	}}
+	rec := Evaluate(in)
+	if rec.State != domain.FreshnessConfirmedStale {
+		t.Fatalf("got %s want confirmed_stale for amending G LinkedIssue", rec.State)
+	}
+}
+
+func TestBekanntmachungLinkedIssueDoesNotConfirmStale(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	in := syncFreshInput("zpo", domain.StandCitation{
+		LawID: "zpo", Year: 2025, Teil: 1, Number: "349", ParseOK: true,
+	}, now)
+	in.LinkedIssues = []domain.GazetteIssue{{
+		ID: "BGBl-1/2026/80", Teil: 1, Year: 2026, Number: "80",
+		Title: "Bekanntmachung der Neufassung der Zivilprozessordnung",
+	}}
+	rec := Evaluate(in)
+	if rec.State == domain.FreshnessConfirmedStale {
+		t.Fatalf("Bekanntmachung LinkedIssue must not confirm_stale; newer=%v", rec.NewerIssueIDs)
+	}
+	if rec.State != domain.FreshnessConfirmedCurrent {
+		t.Fatalf("got %s (%s) want confirmed_current", rec.State, rec.Rationale)
+	}
+}
+
+func TestGesetzTitleMentioningBekanntmachungStillConfirmsStale(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	in := syncFreshInput("bgb", domain.StandCitation{
+		Year: 2024, Teil: 1, Number: "10", ParseOK: true,
+	}, now)
+	in.LinkedIssues = []domain.GazetteIssue{{
+		ID: "BGBl-1/2025/5", Teil: 1, Year: 2025, Number: "5",
+		Title: "Gesetz über die Bekanntmachung und Änderung des BGB",
+	}}
+	rec := Evaluate(in)
+	if rec.State != domain.FreshnessConfirmedStale {
+		t.Fatalf("got %s want confirmed_stale for Gesetz title that mentions Bekanntmachung", rec.State)
+	}
+}
+
+func TestKindGInstrumentIssueNewerConfirmsStale(t *testing.T) {
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	in := syncFreshInput("bgb", domain.StandCitation{
+		Year: 2024, Teil: 1, Number: "10", ParseOK: true,
+	}, now)
+	in.InstrumentRefs = []domain.InstrumentRef{{
+		Kind: "G", Teil: 1, Year: 2025, Number: "90",
+		Raw: "G v. 1.6.2025 I Nr. 90",
+	}}
+	in.InstrumentIssues = []domain.GazetteIssue{{
+		ID: "BGBl-1/2025/90", Teil: 1, Year: 2025, Number: "90",
+	}}
+	rec := Evaluate(in)
+	if rec.State != domain.FreshnessConfirmedStale {
+		t.Fatalf("got %s (%s) want confirmed_stale for newer Kind G InstrumentIssue", rec.State, rec.Rationale)
+	}
+}

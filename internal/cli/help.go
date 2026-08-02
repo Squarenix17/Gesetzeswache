@@ -87,7 +87,7 @@ var commandHelp = []commandDoc{
 		examples: []string{
 			`gew export BGB hierarchical`,
 			`gew export --include=linked ArbZG hierarchical,chunked`,
-			`gew export MiLoG normtext,flat`,
+			`gew export --profile=ingest --allow-stale MiLoG normtext,flat`,
 		},
 	},
 	{
@@ -96,7 +96,7 @@ var commandHelp = []commandDoc{
 		examples: []string{
 			`gew bundle MiLoG normtext`,
 			`gew bundle --compose MiLoG hierarchical`,
-			`gew bundle --include=past MiLoG hierarchical`,
+			`gew bundle --profile=ingest --parent-only MiLoG hierarchical`,
 		},
 	},
 	{
@@ -105,7 +105,7 @@ var commandHelp = []commandDoc{
 		examples: []string{
 			`gew index MiLoG`,
 			`gew index MiLoG --section='§ 1'`,
-			`gew index --include=past MiLoG --section='§ 1,§ 2'`,
+			`gew index --profile=ingest MiLoG --section='§ 1,§ 2'`,
 		},
 	},
 	{

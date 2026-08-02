@@ -13,6 +13,7 @@ parent_law_id<TAB>kind<TAB>gii_slug<TAB>notes[<TAB>effective_from<TAB>section_hi
 - Required when a parent has **two or more** rows: every row must include both `effective_from` and `section_hint`.
 - Example: `milog` → `milov4` / `milov5` (section-scoped rate Verordnungen, not full MiLoG replacements).
 - Example: `sgb11` → `pbav_2025` (Pflege-Beitragssatz under § 55; parent body may still show an older rate).
+- Example: `sgb3` → `insogeldfestv_2024` (Insolvenzgeldumlagesatz under § 358; BGBl 2023 I Nr. 379). After seeding, run `POST /v1/recheck?id=sgb3` so the child Stand is refreshed and Proof C can confirm; until the child is `confirmed_current`, parent stays `uncertain` / `safe_to_serve=false`.
 - **Discovery:** high-confidence links are also auto-discovered from child Ermächtigung + fundstelle during sync. TSV rows **override** discovered rows for the same parent+slug.
 
 Fortschreibung families (`fortschreibung_families.tsv`) map consumer or parent laws (e.g. `sgb2`, `asylblg`, `sgb14`, `sgb6`) to a **slug prefix** such as `rbsfv_`, `bsv_`, or `rvbeitrsbek_`. At runtime the latest catalog year matching that prefix (e.g. `rbsfv_2026`, `bsv_2018`, `rvbeitrsbek_2026`) is attached as a seeded linked instrument with section-scoped coverage; discovered same-prefix historical years are suppressed. Format:

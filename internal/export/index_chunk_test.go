@@ -114,6 +114,87 @@ func TestFilterIndexChunks(t *testing.T) {
 	}
 }
 
+func TestDedupeChunkIDs(t *testing.T) {
+	chunks := []IndexChunk{
+		{ChunkID: "milog:s1/1", Text: "first", LawID: "milog"},
+		{ChunkID: "milog:s1/1", Text: "second", LawID: "milov5"},
+		{ChunkID: "milog:s1/1", Text: "third", LawID: "milov4"},
+		{ChunkID: "milog:s2/1", Text: "unique", LawID: "milog"},
+		{ChunkID: "milog:s2/1", Text: "dup-s2", LawID: "milov5"},
+	}
+	got := DedupeChunkIDs(chunks)
+	if len(got) != len(chunks) {
+		t.Fatalf("len=%d want %d", len(got), len(chunks))
+	}
+	seen := make(map[string]struct{}, len(got))
+	for _, c := range got {
+		if _, dup := seen[c.ChunkID]; dup {
+			t.Fatalf("duplicate chunk_id %q after dedupe", c.ChunkID)
+		}
+		seen[c.ChunkID] = struct{}{}
+	}
+	if got[0].ChunkID != "milog:s1/1" || got[0].Text != "first" {
+		t.Fatalf("first occurrence unchanged: %+v", got[0])
+	}
+	if got[1].ChunkID != "milog:s1/1-2" || got[1].Text != "second" {
+		t.Fatalf("second disambiguation: %+v", got[1])
+	}
+	if got[2].ChunkID != "milog:s1/1-3" || got[2].Text != "third" {
+		t.Fatalf("third disambiguation: %+v", got[2])
+	}
+	if got[3].ChunkID != "milog:s2/1" {
+		t.Fatalf("unique id unchanged: %+v", got[3])
+	}
+	if got[4].ChunkID != "milog:s2/1-2" {
+		t.Fatalf("second s2 disambiguation: %+v", got[4])
+	}
+	// Deterministic: same input yields same output.
+	got2 := DedupeChunkIDs(chunks)
+	for i := range got {
+		if got[i].ChunkID != got2[i].ChunkID {
+			t.Fatalf("index %d: %q vs %q", i, got[i].ChunkID, got2[i].ChunkID)
+		}
+	}
+	// Immutable: input slice unchanged.
+	if chunks[1].ChunkID != "milog:s1/1" {
+		t.Fatalf("input mutated: %+v", chunks[1])
+	}
+}
+
+func TestDedupeChunkIDs_emptyAndSingle(t *testing.T) {
+	if got := DedupeChunkIDs(nil); got != nil {
+		t.Fatalf("nil want nil, got %#v", got)
+	}
+	if got := DedupeChunkIDs([]IndexChunk{}); len(got) != 0 {
+		t.Fatalf("empty want empty, got %#v", got)
+	}
+	single := []IndexChunk{{ChunkID: "a", Text: "only"}}
+	got := DedupeChunkIDs(single)
+	if len(got) != 1 || got[0].ChunkID != "a" {
+		t.Fatalf("single unchanged: %+v", got)
+	}
+}
+
+func TestDedupeChunkIDs_suffixCollision(t *testing.T) {
+	// ["a","a-2","a"] must not emit two "a-2" values.
+	chunks := []IndexChunk{
+		{ChunkID: "a", Text: "1"},
+		{ChunkID: "a-2", Text: "2"},
+		{ChunkID: "a", Text: "3"},
+	}
+	got := DedupeChunkIDs(chunks)
+	seen := map[string]struct{}{}
+	for _, c := range got {
+		if _, dup := seen[c.ChunkID]; dup {
+			t.Fatalf("duplicate chunk_id %q in %+v", c.ChunkID, got)
+		}
+		seen[c.ChunkID] = struct{}{}
+	}
+	if got[0].ChunkID != "a" || got[1].ChunkID != "a-2" || got[2].ChunkID != "a-3" {
+		t.Fatalf("got ids %q %q %q", got[0].ChunkID, got[1].ChunkID, got[2].ChunkID)
+	}
+}
+
 func TestIsIndexableExportChunk_excludesFormulary(t *testing.T) {
 	cases := []struct {
 		ref  string

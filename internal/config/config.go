@@ -9,6 +9,9 @@ import (
 	"github.com/Squarenix17/gesetzeswache/internal/httpx"
 )
 
+// MaxOperativeBundleMembersDefault is the default cap on linked Verordnungen per bundle.
+const MaxOperativeBundleMembersDefault = 8
+
 // Config holds runtime configuration (env-based).
 type Config struct {
 	HTTPAddr                   string
@@ -36,6 +39,7 @@ type Config struct {
 	LinkedInstrumentsPath      string
 	FortschreibungFamiliesPath string
 	RefuseExportStale          bool
+	MaxOperativeBundleMembers  int
 	StandRefreshMax            int // max laws missing Stand to refresh at InitialSync (0 = skip bulk)
 	DiscoveryEnabled           bool
 	DiscoveryMaxPerCycle       int
@@ -68,6 +72,7 @@ func Load() (Config, error) {
 		LinkedInstrumentsPath:      env("GEW_LINKED_INSTRUMENTS_PATH", "variants/linked_instruments.tsv"),
 		FortschreibungFamiliesPath: env("GEW_FORTSCHREIBUNG_FAMILIES_PATH", "variants/fortschreibung_families.tsv"),
 		RefuseExportStale:          envBool("GEW_REFUSE_EXPORT_STALE", false),
+		MaxOperativeBundleMembers:  clampPositiveInt(envInt("GEW_MAX_OPERATIVE_BUNDLE", MaxOperativeBundleMembersDefault), MaxOperativeBundleMembersDefault),
 		StandRefreshMax:            envInt("GEW_STAND_REFRESH_MAX", 10),
 		DiscoveryEnabled:           envBool("GEW_DISCOVERY_ENABLED", true),
 		DiscoveryMaxPerCycle:       envInt("GEW_DISCOVERY_MAX_PER_CYCLE", 50),
@@ -141,4 +146,11 @@ func envBool(k string, def bool) bool {
 		}
 	}
 	return def
+}
+
+func clampPositiveInt(n, def int) int {
+	if n <= 0 {
+		return def
+	}
+	return n
 }

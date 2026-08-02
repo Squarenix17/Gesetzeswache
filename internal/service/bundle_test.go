@@ -368,6 +368,85 @@ func TestExportOperativeBundle_unmatched(t *testing.T) {
 	}
 }
 
+func TestExportOperativeBundle_allowStaleSkipsRefuse(t *testing.T) {
+	mt := httpmock.New()
+	svc := newTestService(t, mt)
+	svc.CFG.RefuseExportStale = true
+	seedCatalog(t, svc, mt)
+	seedSyncFreshMeta(t, svc, time.Now().UTC())
+	stand := citation.Parse("arbzg", "Zuletzt geändert durch Art. 1 G v. 16.8.2023 BGBl. 2023 I Nr. 198")
+	_ = svc.Store.UpsertStand(stand)
+	issueID := citation.IssueID(1, 2026, "999")
+	_ = svc.Store.UpsertIssue(domain.GazetteIssue{ID: issueID, Teil: 1, Year: 2026, Number: "999"})
+	_ = svc.Store.UpsertLink(domain.IssueLawLink{IssueID: issueID, LawID: "arbzg", Class: domain.LinkConfirmed})
+	mt.SetBytes("www.gesetze-im-internet.de", "/arbzg/xml.zip",
+		fixtures.MustZipXML("arbzg.xml", fixtures.MustRead("arbzg_snippet.xml")))
+
+	res, err := svc.ExportOperativeBundle(context.Background(), "arbzg",
+		[]string{export.FormatHierarchical}, BundleOpts{AllowStale: true})
+	if err != nil {
+		t.Fatalf("err=%v want success with AllowStale", err)
+	}
+	if !res.Matched || res.Parent == nil {
+		t.Fatal("expected matched parent export")
+	}
+	if res.BundleFreshness == nil || res.BundleFreshness.SafeToServe {
+		t.Fatalf("safe_to_serve must stay false: %+v", res.BundleFreshness)
+	}
+	if res.BundleFreshness.State != domain.FreshnessConfirmedStale {
+		t.Fatalf("state=%s want confirmed_stale", res.BundleFreshness.State)
+	}
+}
+
+func TestExportOperativeBundle_parentOnlySkipsCap(t *testing.T) {
+	mt := httpmock.New()
+	svc := newTestService(t, mt)
+	seedCatalog(t, svc, mt)
+
+	tsvPath := filepath.Join(t.TempDir(), "links.tsv")
+	var b strings.Builder
+	b.WriteString("# parent\tkind\tslug\tnotes\teffective_from\tsection_hint\n")
+	for i := 0; i < MaxOperativeBundleMembers+1; i++ {
+		slug := fmt.Sprintf("capv_%d", i)
+		hint := fmt.Sprintf("§ %d", i+1)
+		fmt.Fprintf(&b, "p\tverordnung\t%s\tBGBl 2024 I Nr. %d\t2024-01-01\t%s\n", slug, i+1, hint)
+	}
+	if err := os.WriteFile(tsvPath, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cat, err := instruments.LoadTSV(tsvPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.Instruments = cat
+
+	parent := domain.Law{ID: "p", Abbreviation: "P", Title: "Parent", GIIPath: "p", GIIURL: "https://www.gesetze-im-internet.de/p/"}
+	if err := svc.Store.UpsertLaws([]domain.Law{parent}); err != nil {
+		t.Fatal(err)
+	}
+	laws, _ := svc.Store.ListLaws()
+	variants, _ := svc.Store.ListVariants()
+	svc.Search.Swap(laws, variants)
+	seedSyncFreshMeta(t, svc, time.Now().UTC())
+	mt.SetBytes("www.gesetze-im-internet.de", "/p/xml.zip",
+		fixtures.MustZipXML("p.xml", fixtures.MustRead("arbzg_snippet.xml")))
+
+	res, err := svc.ExportOperativeBundle(context.Background(), "p",
+		[]string{export.FormatHierarchical}, BundleOpts{ParentOnly: true})
+	if err != nil {
+		t.Fatalf("err=%v want success with ParentOnly", err)
+	}
+	if !res.Matched || res.Parent == nil {
+		t.Fatal("expected parent export")
+	}
+	if len(res.Operative) != 0 {
+		t.Fatalf("operative=%d want 0 with ParentOnly", len(res.Operative))
+	}
+	if res.BundleFreshness == nil || len(res.BundleFreshness.Members) != 1 || res.BundleFreshness.Members[0].Role != "parent" {
+		t.Fatalf("bundle_freshness should be parent-only: %+v", res.BundleFreshness)
+	}
+}
+
 func TestExportOperativeBundle_refuseStaleMember(t *testing.T) {
 	mt := httpmock.New()
 	svc := newTestService(t, mt)

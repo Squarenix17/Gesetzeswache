@@ -73,7 +73,7 @@ func TestForceRecheck_linkedChildRefresh(t *testing.T) {
 	xmlBody := fixtures.MustRead("milov5_snippet.xml")
 	mt.SetBytes("www.gesetze-im-internet.de", "/milov5/xml.zip", fixtures.MustZipXML("milov5.xml", xmlBody))
 
-	if err := svc.ForceRecheck(context.Background(), "milog"); err != nil {
+	if _, err := svc.ForceRecheck(context.Background(), "milog"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -88,7 +88,7 @@ func TestExportText_directLawIDWhenResolveFails(t *testing.T) {
 	xmlBody := fixtures.MustRead("arbzg_snippet.xml")
 	mt.SetBytes("www.gesetze-im-internet.de", "/onlyid/xml.zip", fixtures.MustZipXML("onlyid.xml", xmlBody))
 
-	res, err := svc.ExportText(context.Background(), "onlyid", []string{export.FormatHierarchical}, IncludeOpts{})
+	res, err := svc.ExportText(context.Background(), "onlyid", []string{export.FormatHierarchical}, IncludeOpts{}, ExportGateOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestExportText_discoveryOnVerordnung(t *testing.T) {
 	xmlBody := fixtures.MustRead("milov5_snippet.xml")
 	mt.SetBytes("www.gesetze-im-internet.de", "/milov5/xml.zip", fixtures.MustZipXML("milov5.xml", xmlBody))
 
-	res, err := svc.ExportText(context.Background(), "milov5", []string{export.FormatNormtext}, IncludeOpts{})
+	res, err := svc.ExportText(context.Background(), "milov5", []string{export.FormatNormtext}, IncludeOpts{}, ExportGateOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestForceRecheck_expiredContext(t *testing.T) {
 	seedCatalog(t, svc, mt)
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
-	err := svc.ForceRecheck(ctx, "")
+	_, err := svc.ForceRecheck(ctx, "")
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -159,7 +159,7 @@ func TestExportText_unmatchedQuery(t *testing.T) {
 	mt := httpmock.New()
 	svc := newTestService(t, mt)
 	seedCatalog(t, svc, mt)
-	res, err := svc.ExportText(context.Background(), "zzzznotalawname", []string{export.FormatHierarchical}, IncludeOpts{})
+	res, err := svc.ExportText(context.Background(), "zzzznotalawname", []string{export.FormatHierarchical}, IncludeOpts{}, ExportGateOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestExportText_defaultFormats(t *testing.T) {
 	seedFreshSync(t, svc, time.Now().UTC())
 	xmlBody := fixtures.MustRead("arbzg_snippet.xml")
 	mt.SetBytes("www.gesetze-im-internet.de", "/arbzg/xml.zip", fixtures.MustZipXML("arbzg.xml", xmlBody))
-	res, err := svc.ExportText(context.Background(), "ArbZG", nil, IncludeOpts{})
+	res, err := svc.ExportText(context.Background(), "ArbZG", nil, IncludeOpts{}, ExportGateOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}

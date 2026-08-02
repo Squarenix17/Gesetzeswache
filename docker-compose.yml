@@ -1,7 +1,10 @@
 services:
   gew:
-    build: .
-    image: gesetzeswache:local
+    build:
+      context: .
+      args:
+        VERSION: "0.5.1"
+    image: gesetzeswache:0.5.1
     container_name: gew
     ports:
       - "8081:8080"

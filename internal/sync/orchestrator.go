@@ -597,7 +597,7 @@ func (o *Orchestrator) heuristicLink(now time.Time) {
 		if now.Sub(iss.FirstSeenAt) < o.CFG.UnmatchedGrace {
 			continue // still in grace — do not heuristic yet
 		}
-		best, _ := snap.Resolve(iss.Title, o.CFG.MatchThreshold)
+		best, _, _ := snap.Resolve(iss.Title, o.CFG.MatchThreshold)
 		if best == nil {
 			continue
 		}
@@ -921,11 +921,11 @@ func matchLawFromItem(it rssItem, snap *search.Snapshot) string {
 	}
 	text := it.Title + " " + it.Description
 	if m := reLawAbbr.FindStringSubmatch(text); len(m) == 2 {
-		if best, _ := snap.Resolve(m[1], 0.9); best != nil {
+		if best, _, _ := snap.Resolve(m[1], 0.9); best != nil {
 			return best.Law.ID
 		}
 	}
-	if best, _ := snap.Resolve(it.Title, 0.85); best != nil {
+	if best, _, _ := snap.Resolve(it.Title, 0.85); best != nil {
 		return best.Law.ID
 	}
 	return ""

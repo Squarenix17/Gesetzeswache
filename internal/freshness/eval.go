@@ -76,12 +76,19 @@ func Evaluate(in Input) domain.FreshnessRecord {
 
 	var newer []string
 	for _, iss := range in.LinkedIssues {
+		if isBareBekanntmachungIssue(iss) {
+			continue
+		}
 		if issueNewerThanStand(iss, in.Stand) {
 			newer = append(newer, iss.ID)
 		}
 	}
-	// Instrument issues cited in +++ / Stand that are newer than reflected Stand
+	// Instrument issues cited in +++ / Stand that are newer than reflected Stand.
+	// Bare editorial Bek. does not drive confirmed_stale; Kind G/V and section-scoped Bek do.
 	for _, iss := range in.InstrumentIssues {
+		if !instrumentIssueIsStaleRelevant(iss, in.InstrumentRefs) {
+			continue
+		}
 		if issueNewerThanStand(iss, in.Stand) {
 			newer = append(newer, iss.ID)
 		}
@@ -278,6 +285,61 @@ func isOperativeInstrumentRef(ref domain.InstrumentRef, hasSeeded bool) bool {
 	default:
 		return hasSeeded && kind == ""
 	}
+}
+
+// isStaleRelevantInstrumentRef reports whether a parsed instrument citation may
+// contribute to newer_issue_ids / confirmed_stale. Amending G counts here even
+// though G is never "operative" for the unresolved-ref uncertain path.
+func isStaleRelevantInstrumentRef(ref domain.InstrumentRef) bool {
+	kind := strings.ToUpper(strings.TrimSpace(ref.Kind))
+	switch kind {
+	case "G", "V":
+		return true
+	case "BEK":
+		return strings.TrimSpace(ref.SectionHint) != ""
+	default:
+		return false
+	}
+}
+
+func instrumentIssueIsStaleRelevant(iss domain.GazetteIssue, refs []domain.InstrumentRef) bool {
+	for _, ref := range refs {
+		if !issueMatchesInstrumentRef(iss, ref) {
+			continue
+		}
+		if isStaleRelevantInstrumentRef(ref) {
+			return true
+		}
+	}
+	return false
+}
+
+func issueMatchesInstrumentRef(iss domain.GazetteIssue, ref domain.InstrumentRef) bool {
+	if iss.Year != ref.Year || iss.Number != ref.Number {
+		return false
+	}
+	if iss.Teil != 0 && ref.Teil != 0 && iss.Teil != ref.Teil {
+		return false
+	}
+	return true
+}
+
+// isBareBekanntmachungIssue skips feed-linked Bekanntmachungen from the stale
+// path. Fail-closed: only skip when the title clearly *starts* as a Bek./Bekanntmachung
+// promulgation, not when "Bekanntmachung" appears mid-title on an amending Gesetz.
+func isBareBekanntmachungIssue(iss domain.GazetteIssue) bool {
+	title := strings.TrimSpace(iss.Title)
+	if title == "" {
+		return false
+	}
+	lower := strings.ToLower(title)
+	if strings.HasPrefix(lower, "bekanntmachung") {
+		return true
+	}
+	if strings.HasPrefix(lower, "bek.") || strings.HasPrefix(lower, "bek ") {
+		return true
+	}
+	return false
 }
 
 func findVRefResolution(resolutions []domain.VRefResolution, ref domain.InstrumentRef) (domain.VRefResolution, bool) {

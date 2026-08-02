@@ -1,6 +1,9 @@
 package export
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // IndexChunk is an ingest-ready vector payload (flat; no freshness per chunk).
 type IndexChunk struct {
@@ -81,6 +84,36 @@ func FilterIndexChunks(chunks []IndexChunk, refs []string) []IndexChunk {
 	for _, c := range chunks {
 		if MatchSectionFilter(c, refs) {
 			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// DedupeChunkIDs returns a copy of chunks with unique ChunkID values. The first
+// occurrence of each ID is unchanged when free; later collisions get a stable
+// "-2", "-3", … suffix that does not collide with any already-assigned ID.
+func DedupeChunkIDs(chunks []IndexChunk) []IndexChunk {
+	if len(chunks) == 0 {
+		return nil
+	}
+	out := make([]IndexChunk, len(chunks))
+	used := make(map[string]struct{}, len(chunks))
+	for i, c := range chunks {
+		out[i] = c
+		id := c.ChunkID
+		if _, taken := used[id]; !taken {
+			used[id] = struct{}{}
+			continue
+		}
+		base := c.ChunkID
+		for n := 2; ; n++ {
+			cand := base + "-" + strconv.Itoa(n)
+			if _, taken := used[cand]; taken {
+				continue
+			}
+			out[i].ChunkID = cand
+			used[cand] = struct{}{}
+			break
 		}
 	}
 	return out

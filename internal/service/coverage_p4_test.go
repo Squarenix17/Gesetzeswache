@@ -22,7 +22,7 @@ func TestForceRecheck_specificLaw(t *testing.T) {
 	mt.SetBytes("www.recht.bund.de", "/rss/feeds/rss_bgbl-2.xml", fixtures.MustRead("bgbl2_ok.xml"))
 	mt.SetBytes("www.gesetze-im-internet.de", "/arbzg/index.html", fixtures.MustRead("arbzg_index_no_stand.html"))
 
-	if err := svc.ForceRecheck(context.Background(), "arbzg"); err != nil {
+	if _, err := svc.ForceRecheck(context.Background(), "arbzg"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -38,11 +38,11 @@ func TestExportText_cacheHit(t *testing.T) {
 	mt.SetBytes("www.gesetze-im-internet.de", "/bgb/xml.zip", fixtures.MustZipXML("bgb.xml", xmlBody))
 
 	formats := []string{export.FormatHierarchical, export.FormatFlat, export.FormatChunked}
-	res1, err := svc.ExportText(context.Background(), "bgb", formats, IncludeOpts{})
+	res1, err := svc.ExportText(context.Background(), "bgb", formats, IncludeOpts{}, ExportGateOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	res2, err := svc.ExportText(context.Background(), "bgb", formats, IncludeOpts{})
+	res2, err := svc.ExportText(context.Background(), "bgb", formats, IncludeOpts{}, ExportGateOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestExportText_refuseStale(t *testing.T) {
 	issueID := citation.IssueID(1, 2026, "999")
 	_ = svc.Store.UpsertIssue(domain.GazetteIssue{ID: issueID, Teil: 1, Year: 2026, Number: "999"})
 	_ = svc.Store.UpsertLink(domain.IssueLawLink{IssueID: issueID, LawID: "bgb", Class: domain.LinkConfirmed})
-	_, err := svc.ExportText(context.Background(), "bgb", []string{export.FormatHierarchical}, IncludeOpts{})
+	_, err := svc.ExportText(context.Background(), "bgb", []string{export.FormatHierarchical}, IncludeOpts{}, ExportGateOpts{})
 	if err == nil || err.Error() != "export refused: law confirmed_stale" {
 		t.Fatalf("err=%v", err)
 	}
@@ -120,7 +120,7 @@ func TestExportText_arbzg_normtext(t *testing.T) {
 	xmlBody := fixtures.MustRead("arbzg_snippet.xml")
 	mt.SetBytes("www.gesetze-im-internet.de", "/arbzg/xml.zip", fixtures.MustZipXML("arbzg.xml", xmlBody))
 
-	res, err := svc.ExportText(context.Background(), "arbzg", []string{export.FormatNormtext, export.FormatFlat}, IncludeOpts{})
+	res, err := svc.ExportText(context.Background(), "arbzg", []string{export.FormatNormtext, export.FormatFlat}, IncludeOpts{}, ExportGateOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestForceRecheck_byAbbreviation(t *testing.T) {
 	mt.SetBytes("www.gesetze-im-internet.de", "/aktuDienst-rss-feed.xml", fixtures.MustRead("gii_feed.xml"))
 	mt.SetBytes("www.recht.bund.de", "/rss/feeds/rss_bgbl-1.xml", fixtures.MustRead("bgbl1_ok.xml"))
 	mt.SetBytes("www.recht.bund.de", "/rss/feeds/rss_bgbl-2.xml", fixtures.MustRead("bgbl2_ok.xml"))
-	if err := svc.ForceRecheck(context.Background(), "ArbZG"); err != nil {
+	if _, err := svc.ForceRecheck(context.Background(), "ArbZG"); err != nil {
 		t.Fatal(err)
 	}
 }

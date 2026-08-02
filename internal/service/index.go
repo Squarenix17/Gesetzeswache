@@ -10,8 +10,10 @@ import (
 
 // IndexOpts controls index export membership and optional section filter.
 type IndexOpts struct {
-	Past     bool
-	Sections []string // empty = all sections
+	Past       bool
+	Sections   []string // empty = all sections
+	AllowStale bool
+	ParentOnly bool
 }
 
 // IndexResult is a flat ingest-ready chunk list plus bundle freshness for gating.
@@ -26,7 +28,11 @@ type IndexResult struct {
 // ExportIndexChunks resolves a parent law, exports parent + current (optionally past)
 // linked instruments as flat IndexChunks, then optionally filters by section.
 func (s *Service) ExportIndexChunks(ctx context.Context, query string, opts IndexOpts) (IndexResult, error) {
-	bundle, err := s.ExportOperativeBundle(ctx, query, []string{export.FormatChunked}, BundleOpts{Past: opts.Past})
+	bundle, err := s.ExportOperativeBundle(ctx, query, []string{export.FormatChunked}, BundleOpts{
+		Past:       opts.Past,
+		AllowStale: opts.AllowStale,
+		ParentOnly: opts.ParentOnly,
+	})
 	if err != nil {
 		return IndexResult{}, err
 	}
@@ -83,6 +89,7 @@ func (s *Service) ExportIndexChunks(ctx context.Context, query string, opts Inde
 	}
 
 	chunks = export.FilterIndexChunks(chunks, opts.Sections)
+	chunks = export.DedupeChunkIDs(chunks)
 	return IndexResult{
 		Matched:         true,
 		Query:           query,

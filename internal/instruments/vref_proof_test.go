@@ -382,3 +382,32 @@ func TestMarkSupersededPastKindV_unmatched999StaysUnresolved(t *testing.T) {
 		t.Fatalf("unmatched 999 must not become Historical; got %+v", got[1])
 	}
 }
+
+func TestResolveOperativeVRefs_SGBIII_InsoGeldFestV2024_Nr379(t *testing.T) {
+	// Consumer Error B: V v. 15.12.2023 I Nr. 379 must match seeded InsoGeldFestV 2024.
+	annotated := []domain.LinkedInstrument{{
+		ParentLawID: "sgb3", Kind: "verordnung", GIISlug: "insogeldfestv_2024",
+		Notes: "Insolvenzgeldumlagesatzverordnung 2024 (BGBl 2023 I Nr. 379)",
+		EffectiveFrom: "2024-01-01", SectionHint: "§ 358", Status: StatusCurrent,
+	}}
+	ref := domain.InstrumentRef{
+		Kind: "V", Teil: 1, Year: 2023, Number: "379", SectionHint: "§ 358",
+		Raw: "§ 358 V v. 15.12.2023 I Nr. 379",
+	}
+	childStands := map[string]domain.StandCitation{
+		"insogeldfestv_2024": {
+			LawID: "insogeldfestv_2024", Year: 2023, Teil: 1, Number: "379", ParseOK: true,
+			Raw: "BGBl. 2023 I Nr. 379",
+		},
+	}
+	got := ResolveOperativeVRefs([]domain.InstrumentRef{ref}, annotated, childStands, nil, domain.StandCitation{
+		LawID: "sgb3", Year: 2026, Teil: 1, Number: "100", ParseOK: true,
+	})
+	if len(got) != 1 {
+		t.Fatalf("got %d resolutions", len(got))
+	}
+	if got[0].MatchedGIISlug != "insogeldfestv_2024" {
+		t.Fatalf("MatchedGIISlug=%q want insogeldfestv_2024", got[0].MatchedGIISlug)
+	}
+}
+

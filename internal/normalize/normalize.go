@@ -43,6 +43,7 @@ func AlternateKeys(s string) []string {
 			out = append(out, strings.ReplaceAll(k, r.from, r.to))
 		}
 	}
+	out = append(out, sgbBookAlternateKeys(s)...)
 	return unique(out)
 }
 

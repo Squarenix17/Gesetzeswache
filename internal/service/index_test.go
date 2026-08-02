@@ -101,6 +101,13 @@ func TestExportIndexChunks_MiLoG(t *testing.T) {
 	if parentN == 0 || opN == 0 {
 		t.Fatalf("parent=%d operative=%d", parentN, opN)
 	}
+	ids := make(map[string]struct{}, len(res.Chunks))
+	for _, c := range res.Chunks {
+		if _, dup := ids[c.ChunkID]; dup {
+			t.Fatalf("duplicate chunk_id %q in export", c.ChunkID)
+		}
+		ids[c.ChunkID] = struct{}{}
+	}
 	for _, c := range res.Chunks {
 		if strings.EqualFold(c.SectionRef, "Eingangsformel") {
 			t.Fatalf("Eingangsformel must not appear in index chunks: %+v", c)

@@ -42,15 +42,16 @@ func Run(ctx context.Context, svc *service.Service, args []string) int {
 		if len(args) > 1 {
 			id = args[1]
 		}
-		err := svc.ForceRecheck(ctx, id)
-		return printJSON(map[string]string{"status": "ok"}, err)
+		res, err := svc.ForceRecheck(ctx, id)
+		return printJSON(res, err)
 	case "sync-status":
 		res, err := svc.SyncStatus(ctx)
 		return printJSON(res, err)
 	case "export":
 		opts, rest := peelIncludeFlags(args[1:])
+		gate, rest := peelExportGateFlags(rest)
 		if len(rest) < 1 {
-			fmt.Fprintln(os.Stderr, "usage: export [--include=past,linked] <query> [formats: hierarchical|chunked|flat|normtext]")
+			fmt.Fprintln(os.Stderr, "usage: export [--include=past,linked] [--allow-stale] [--profile=ingest] <query> [formats: hierarchical|chunked|flat|normtext]")
 			return 2
 		}
 		var formats []string
@@ -58,7 +59,7 @@ func Run(ctx context.Context, svc *service.Service, args []string) int {
 		if len(rest) > 1 {
 			formats = strings.Split(rest[1], ",")
 		}
-		res, err := svc.ExportText(ctx, q, formats, opts)
+		res, err := svc.ExportText(ctx, q, formats, opts, gate)
 		return printJSON(res, err)
 	case "bundle":
 		opts, rest := peelBundleFlags(args[1:])
@@ -118,6 +119,18 @@ func peelBundleFlags(args []string) (service.BundleOpts, []string) {
 		switch {
 		case a == "--compose":
 			opts.Compose = true
+		case a == "--allow-stale" || strings.HasPrefix(a, "--allow-stale="):
+			if applyBoolFlag(&opts.AllowStale, strings.TrimPrefix(a, "--allow-stale")) {
+				continue
+			}
+		case a == "--parent-only" || strings.HasPrefix(a, "--parent-only="):
+			if applyBoolFlag(&opts.ParentOnly, strings.TrimPrefix(a, "--parent-only")) {
+				continue
+			}
+		case strings.HasPrefix(a, "--profile="):
+			if strings.EqualFold(strings.TrimPrefix(a, "--profile="), "ingest") {
+				opts.AllowStale = true
+			}
 		case strings.HasPrefix(a, "--include="):
 			part := service.ParseInclude(strings.TrimPrefix(a, "--include="))
 			opts.Past = opts.Past || part.Past
@@ -140,6 +153,18 @@ func peelIndexFlags(args []string) (service.IndexOpts, []string) {
 			opts.Sections = append(opts.Sections, refs...)
 		case a == "--section":
 			continue
+		case a == "--allow-stale" || strings.HasPrefix(a, "--allow-stale="):
+			if applyBoolFlag(&opts.AllowStale, strings.TrimPrefix(a, "--allow-stale")) {
+				continue
+			}
+		case a == "--parent-only" || strings.HasPrefix(a, "--parent-only="):
+			if applyBoolFlag(&opts.ParentOnly, strings.TrimPrefix(a, "--parent-only")) {
+				continue
+			}
+		case strings.HasPrefix(a, "--profile="):
+			if strings.EqualFold(strings.TrimPrefix(a, "--profile="), "ingest") {
+				opts.AllowStale = true
+			}
 		case strings.HasPrefix(a, "--include="):
 			part := service.ParseInclude(strings.TrimPrefix(a, "--include="))
 			opts.Past = opts.Past || part.Past
@@ -150,6 +175,44 @@ func peelIndexFlags(args []string) (service.IndexOpts, []string) {
 		}
 	}
 	return opts, rest
+}
+
+func peelExportGateFlags(args []string) (service.ExportGateOpts, []string) {
+	var gate service.ExportGateOpts
+	var rest []string
+	for _, a := range args {
+		switch {
+		case a == "--allow-stale" || strings.HasPrefix(a, "--allow-stale="):
+			if applyBoolFlag(&gate.AllowStale, strings.TrimPrefix(a, "--allow-stale")) {
+				continue
+			}
+		case strings.HasPrefix(a, "--profile="):
+			if strings.EqualFold(strings.TrimPrefix(a, "--profile="), "ingest") {
+				gate.AllowStale = true
+			}
+		default:
+			rest = append(rest, a)
+		}
+	}
+	return gate, rest
+}
+
+func applyBoolFlag(dst *bool, raw string) bool {
+	raw = strings.TrimPrefix(raw, "=")
+	if raw == "" {
+		*dst = true
+		return true
+	}
+	v := strings.TrimSpace(raw)
+	if v == "1" || strings.EqualFold(v, "true") {
+		*dst = true
+		return true
+	}
+	if v == "0" || strings.EqualFold(v, "false") {
+		*dst = false
+		return true
+	}
+	return false
 }
 
 func printJSON(v any, err error) int {

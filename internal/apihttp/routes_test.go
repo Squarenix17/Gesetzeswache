@@ -2,13 +2,17 @@ package apihttp
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Squarenix17/gesetzeswache/internal/domain"
+	"github.com/Squarenix17/gesetzeswache/internal/instruments"
 	"github.com/Squarenix17/gesetzeswache/internal/service"
 	"github.com/Squarenix17/gesetzeswache/internal/test/fixtures"
 )
@@ -20,6 +24,35 @@ func seedCatalogForHTTP(t *testing.T, srv *Server) {
 		t.Fatal(err)
 	}
 	srv.Svc.Search.Swap([]domain.Law{law}, nil)
+	now := time.Now().UTC()
+	_ = srv.Svc.Store.SetMetaTime("last_toc_success", now)
+	_ = srv.Svc.Store.SetMetaTime("last_gii_feed_success", now)
+	_ = srv.Svc.Store.SetMetaTime("last_bgbl_feed_success", now)
+}
+
+func seedManyLinkedParentHTTP(t *testing.T, srv *Server) {
+	t.Helper()
+	tsvPath := filepath.Join(t.TempDir(), "links.tsv")
+	var b strings.Builder
+	b.WriteString("# parent\tkind\tslug\tnotes\teffective_from\tsection_hint\n")
+	for i := 0; i < service.MaxOperativeBundleMembers+1; i++ {
+		slug := fmt.Sprintf("capv_%d", i)
+		hint := fmt.Sprintf("§ %d", i+1)
+		fmt.Fprintf(&b, "p\tverordnung\t%s\tBGBl 2024 I Nr. %d\t2024-01-01\t%s\n", slug, i+1, hint)
+	}
+	if err := os.WriteFile(tsvPath, []byte(b.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cat, err := instruments.LoadTSV(tsvPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.Svc.Instruments = cat
+	parent := domain.Law{ID: "p", Abbreviation: "P", Title: "Parent", GIIPath: "p", GIIURL: "https://www.gesetze-im-internet.de/p/"}
+	if err := srv.Svc.Store.UpsertLaws([]domain.Law{parent}); err != nil {
+		t.Fatal(err)
+	}
+	srv.Svc.Search.Swap([]domain.Law{parent}, nil)
 	now := time.Now().UTC()
 	_ = srv.Svc.Store.SetMetaTime("last_toc_success", now)
 	_ = srv.Svc.Store.SetMetaTime("last_gii_feed_success", now)
@@ -268,8 +301,87 @@ func TestBundle_HTTP_refuseStale(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/bundle?q=ArbZG&format=hierarchical", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadGateway {
+	if rec.Code != http.StatusConflict {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	var env service.Envelope
+	if err := json.NewDecoder(rec.Body).Decode(&env); err != nil {
+		t.Fatal(err)
+	}
+	if env.ErrorCode == nil || *env.ErrorCode != "export_refused_confirmed_stale" {
+		t.Fatalf("error_code=%v want export_refused_confirmed_stale", env.ErrorCode)
+	}
+}
+
+func TestBundle_HTTP_allowStaleAndProfileIngest(t *testing.T) {
+	srv, mt := testServer(t, "")
+	seedCatalogForHTTP(t, srv)
+	srv.Svc.CFG.RefuseExportStale = true
+	now := time.Now().UTC()
+	_ = srv.Svc.Store.SetMetaTime("last_toc_success", now)
+	_ = srv.Svc.Store.SetMetaTime("last_gii_feed_success", now)
+	_ = srv.Svc.Store.SetMetaTime("last_bgbl_feed_success", now)
+	stand := domain.StandCitation{LawID: "arbzg", Raw: "Zuletzt geändert durch Art. 1 G v. 16.8.2023 BGBl. 2023 I Nr. 198", ParseOK: true, Year: 2023, Teil: 1, Number: "198"}
+	_ = srv.Svc.Store.UpsertStand(stand)
+	issueID := "BGBl-1/2026/999"
+	_ = srv.Svc.Store.UpsertIssue(domain.GazetteIssue{ID: issueID, Teil: 1, Year: 2026, Number: "999"})
+	_ = srv.Svc.Store.UpsertLink(domain.IssueLawLink{IssueID: issueID, LawID: "arbzg", Class: domain.LinkConfirmed})
+	mt.SetBytes("www.gesetze-im-internet.de", "/arbzg/xml.zip", fixtures.MustZipXML("arbzg.xml", fixtures.MustRead("arbzg_snippet.xml")))
+
+	for _, q := range []string{
+		"/v1/bundle?q=ArbZG&format=hierarchical&allow_stale=1",
+		"/v1/bundle?q=ArbZG&format=hierarchical&profile=ingest",
+		"/v1/index?q=ArbZG&profile=INGEST",
+	} {
+		req := httptest.NewRequest(http.MethodGet, q, nil)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s status %d body %s", q, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestBundle_HTTP_parentOnlySkipsCap(t *testing.T) {
+	srv, mt := testServer(t, "")
+	seedManyLinkedParentHTTP(t, srv)
+	mt.SetBytes("www.gesetze-im-internet.de", "/p/xml.zip", fixtures.MustZipXML("p.xml", fixtures.MustRead("arbzg_snippet.xml")))
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/bundle?q=p&format=hierarchical&parent_only=true", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestBundle_HTTP_oversizedStructuredBody(t *testing.T) {
+	srv, _ := testServer(t, "")
+	seedManyLinkedParentHTTP(t, srv)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/bundle?q=p&format=hierarchical", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	var env service.Envelope
+	if err := json.NewDecoder(rec.Body).Decode(&env); err != nil {
+		t.Fatal(err)
+	}
+	if env.Error == nil || !strings.Contains(*env.Error, "operative bundle too large") {
+		t.Fatalf("error=%v", env.Error)
+	}
+	if env.ErrorCode == nil || *env.ErrorCode != "operative_bundle_too_large" {
+		t.Fatalf("error_code=%v want operative_bundle_too_large", env.ErrorCode)
+	}
+	data, ok := env.Data.(map[string]any)
+	if !ok {
+		raw, _ := json.Marshal(env.Data)
+		_ = json.Unmarshal(raw, &data)
+	}
+	if data["max"] == nil || data["actual"] == nil || data["members"] == nil {
+		t.Fatalf("data=%+v want max/actual/members", data)
 	}
 }
 

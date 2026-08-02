@@ -37,7 +37,7 @@ func TestForceRecheck_unknownLaw(t *testing.T) {
 	mt.SetBytes("www.recht.bund.de", "/rss/feeds/rss_bgbl-1.xml", fixtures.MustRead("bgbl1_ok.xml"))
 	mt.SetBytes("www.recht.bund.de", "/rss/feeds/rss_bgbl-2.xml", fixtures.MustRead("bgbl2_ok.xml"))
 
-	err := svc.ForceRecheck(context.Background(), "no-such-law")
+	_, err := svc.ForceRecheck(context.Background(), "no-such-law")
 	if err != ErrLawNotFound {
 		t.Fatalf("err=%v want ErrLawNotFound", err)
 	}
@@ -51,7 +51,7 @@ func TestForceRecheck_allLaws(t *testing.T) {
 	mt.SetBytes("www.recht.bund.de", "/rss/feeds/rss_bgbl-1.xml", fixtures.MustRead("bgbl1_ok.xml"))
 	mt.SetBytes("www.recht.bund.de", "/rss/feeds/rss_bgbl-2.xml", fixtures.MustRead("bgbl2_ok.xml"))
 
-	if err := svc.ForceRecheck(context.Background(), ""); err != nil {
+	if _, err := svc.ForceRecheck(context.Background(), ""); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -61,7 +61,7 @@ func TestExportText_disabled(t *testing.T) {
 	svc := newTestService(t, mt)
 	seedCatalog(t, svc, mt)
 	svc.CFG.EnableExport = false
-	_, err := svc.ExportText(context.Background(), "ArbZG", nil, IncludeOpts{})
+	_, err := svc.ExportText(context.Background(), "ArbZG", nil, IncludeOpts{}, ExportGateOpts{})
 	if err == nil || err.Error() != "export disabled" {
 		t.Fatalf("err=%v", err)
 	}
@@ -71,7 +71,7 @@ func TestExportText_emptyFormats(t *testing.T) {
 	mt := httpmock.New()
 	svc := newTestService(t, mt)
 	seedCatalog(t, svc, mt)
-	_, err := svc.ExportText(context.Background(), "ArbZG", []string{}, IncludeOpts{})
+	_, err := svc.ExportText(context.Background(), "ArbZG", []string{}, IncludeOpts{}, ExportGateOpts{})
 	if err == nil || err.Error() != "empty format list" {
 		t.Fatalf("err=%v", err)
 	}
@@ -81,7 +81,7 @@ func TestExportText_unknownFormat(t *testing.T) {
 	mt := httpmock.New()
 	svc := newTestService(t, mt)
 	seedCatalog(t, svc, mt)
-	_, err := svc.ExportText(context.Background(), "ArbZG", []string{"bogus"}, IncludeOpts{})
+	_, err := svc.ExportText(context.Background(), "ArbZG", []string{"bogus"}, IncludeOpts{}, ExportGateOpts{})
 	if err == nil || !strings.Contains(err.Error(), "unknown format") {
 		t.Fatalf("err=%v", err)
 	}

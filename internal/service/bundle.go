@@ -17,8 +17,10 @@ const MaxOperativeBundleMembers = 8
 
 // BundleOpts controls operative-bundle membership and optional display compose.
 type BundleOpts struct {
-	Past    bool // include status=past instruments
-	Compose bool // emit display-only composed hierarchical (not for vector ingest)
+	Past       bool // include status=past instruments
+	Compose    bool // emit display-only composed hierarchical (not for vector ingest)
+	AllowStale bool // skip RefuseExportStale gate; does not change safe_to_serve
+	ParentOnly bool // export parent only; skip operative members and size cap
 }
 
 // BundleMemberFreshness is one row in bundle_freshness.members.
@@ -106,21 +108,39 @@ func (s *Service) ExportOperativeBundle(ctx context.Context, query string, forma
 func (s *Service) exportOperativeBundleLaw(ctx context.Context, query string, parent domain.Law, formats []string, opts BundleOpts) (OperativeBundleResult, error) {
 	include := IncludeOpts{Past: opts.Past, Linked: true}
 	now := time.Now().UTC()
-	annotated, _ := s.operativeAnnotatedLinked(parent.ID, now)
-	members := instruments.FilterBundleMembers(annotated, opts.Past)
-	if len(members) > MaxOperativeBundleMembers {
-		return OperativeBundleResult{}, fmt.Errorf("operative bundle too large (max %d)", MaxOperativeBundleMembers)
+	gate := ExportGateOpts{AllowStale: opts.AllowStale}
+
+	var members []domain.LinkedInstrument
+	if !opts.ParentOnly {
+		annotated, _ := s.operativeAnnotatedLinked(parent.ID, now)
+		members = instruments.FilterBundleMembers(annotated, opts.Past)
+		maxMembers := s.maxOperativeBundleMembers()
+		if len(members) > maxMembers {
+			refs := make([]OperativeBundleMemberRef, 0, len(members))
+			for _, m := range members {
+				refs = append(refs, OperativeBundleMemberRef{
+					LawID:       m.LawID,
+					GIISlug:     m.GIISlug,
+					SectionHint: m.SectionHint,
+				})
+			}
+			return OperativeBundleResult{}, &OperativeBundleTooLargeError{
+				Max:     maxMembers,
+				Actual:  len(members),
+				Members: refs,
+			}
+		}
 	}
 
 	parentMeta, err := s.freshnessFor(parent.ID, include)
 	if err != nil {
 		return OperativeBundleResult{}, err
 	}
-	if s.CFG.RefuseExportStale && parentMeta.State == domain.FreshnessConfirmedStale {
+	if s.CFG.RefuseExportStale && !opts.AllowStale && parentMeta.State == domain.FreshnessConfirmedStale {
 		return OperativeBundleResult{}, fmt.Errorf("export refused: bundle member confirmed_stale")
 	}
 
-	parentExport, err := s.exportLaw(ctx, parent, parentMeta, formats, include)
+	parentExport, err := s.exportLaw(ctx, parent, parentMeta, formats, include, gate)
 	if err != nil {
 		if strings.Contains(err.Error(), "confirmed_stale") {
 			return OperativeBundleResult{}, fmt.Errorf("export refused: bundle member confirmed_stale")
@@ -133,7 +153,7 @@ func (s *Service) exportOperativeBundleLaw(ctx context.Context, query string, pa
 	if needHierForPlacement || opts.Compose {
 		// Ensure hierarchical exists for placement / compose without polluting index formats.
 		if parentHier == "" {
-			extra, err := s.exportLaw(ctx, parent, parentMeta, []string{export.FormatHierarchical}, include)
+			extra, err := s.exportLaw(ctx, parent, parentMeta, []string{export.FormatHierarchical}, include, gate)
 			if err != nil {
 				return OperativeBundleResult{}, err
 			}
@@ -165,10 +185,10 @@ func (s *Service) exportOperativeBundleLaw(ctx context.Context, query string, pa
 		if err != nil {
 			return OperativeBundleResult{}, err
 		}
-		if s.CFG.RefuseExportStale && childMeta.State == domain.FreshnessConfirmedStale {
+		if s.CFG.RefuseExportStale && !opts.AllowStale && childMeta.State == domain.FreshnessConfirmedStale {
 			return OperativeBundleResult{}, fmt.Errorf("export refused: bundle member confirmed_stale")
 		}
-		childExport, err := s.exportLaw(ctx, child, childMeta, formats, IncludeOpts{})
+		childExport, err := s.exportLaw(ctx, child, childMeta, formats, IncludeOpts{}, gate)
 		if err != nil {
 			if strings.Contains(err.Error(), "confirmed_stale") {
 				return OperativeBundleResult{}, fmt.Errorf("export refused: bundle member confirmed_stale")
@@ -183,7 +203,7 @@ func (s *Service) exportOperativeBundleLaw(ctx context.Context, query string, pa
 
 		childHier, _ := childExport.Formats[export.FormatHierarchical].(string)
 		if childHier == "" && opts.Compose {
-			extra, err := s.exportLaw(ctx, child, childMeta, []string{export.FormatHierarchical}, IncludeOpts{})
+			extra, err := s.exportLaw(ctx, child, childMeta, []string{export.FormatHierarchical}, IncludeOpts{}, gate)
 			if err != nil {
 				return OperativeBundleResult{}, err
 			}
@@ -290,4 +310,12 @@ func aggregateBundleFreshness(parent *BundleMemberExport, ops []OperativeMemberE
 		meta.Rationale = "member_uncertain"
 	}
 	return meta
+}
+
+func (s *Service) maxOperativeBundleMembers() int {
+	n := s.CFG.MaxOperativeBundleMembers
+	if n <= 0 {
+		return MaxOperativeBundleMembers
+	}
+	return n
 }

@@ -5,6 +5,42 @@ import (
 	"testing"
 )
 
+func TestLoad_MaxOperativeBundleDefault(t *testing.T) {
+	t.Setenv("GEW_MAX_OPERATIVE_BUNDLE", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MaxOperativeBundleMembers != 8 {
+		t.Fatalf("MaxOperativeBundleMembers=%d want 8", cfg.MaxOperativeBundleMembers)
+	}
+}
+
+func TestLoad_MaxOperativeBundleEnv(t *testing.T) {
+	t.Setenv("GEW_MAX_OPERATIVE_BUNDLE", "12")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MaxOperativeBundleMembers != 12 {
+		t.Fatalf("MaxOperativeBundleMembers=%d want 12", cfg.MaxOperativeBundleMembers)
+	}
+}
+
+func TestLoad_MaxOperativeBundleInvalidFallsBack(t *testing.T) {
+	t.Setenv("GEW_MAX_OPERATIVE_BUNDLE", "0")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MaxOperativeBundleMembers != 8 {
+		t.Fatalf("invalid/zero should clamp to 8, got %d", cfg.MaxOperativeBundleMembers)
+	}
+}
+
 func TestLoad_DiscoveryDefaults(t *testing.T) {
 	t.Setenv("GEW_DISCOVERY_ENABLED", "")
 	t.Setenv("GEW_DISCOVERY_MAX_PER_CYCLE", "")

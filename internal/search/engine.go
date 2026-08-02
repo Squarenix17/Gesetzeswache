@@ -3,6 +3,8 @@ package search
 
 import (
 	"sort"
+	"strconv"
+	"strings"
 	"sync/atomic"
 
 	"github.com/Squarenix17/gesetzeswache/internal/domain"
@@ -59,6 +61,9 @@ func build(laws []domain.Law, variants []domain.LawVariant) *Snapshot {
 		s.byID[l.ID] = l
 		ak := normalize.Key(l.Abbreviation)
 		s.byAbbr[ak] = append(s.byAbbr[ak], l)
+		for _, alias := range normalize.SGBBookLawIDKeys(l.ID, l.Abbreviation) {
+			s.byAbbr[alias] = appendUniqueLaw(s.byAbbr[alias], l)
+		}
 		tk := normalize.Key(l.Title)
 		s.byTitle[tk] = append(s.byTitle[tk], l)
 	}
@@ -68,10 +73,10 @@ func build(laws []domain.Law, variants []domain.LawVariant) *Snapshot {
 	return s
 }
 
-// Resolve returns the best match above threshold, or suggestions below it.
-func (s *Snapshot) Resolve(query string, threshold float64) (best *Candidate, suggestions []Candidate) {
+// Resolve returns the best match above threshold, suggestions, and whether the query is ambiguous.
+func (s *Snapshot) Resolve(query string, threshold float64) (best *Candidate, suggestions []Candidate, ambiguous bool) {
 	if s == nil || query == "" {
-		return nil, nil
+		return nil, nil, false
 	}
 	qkeys := normalize.AlternateKeys(query)
 	scores := map[string]float64{}
@@ -89,6 +94,14 @@ func (s *Snapshot) Resolve(query string, threshold float64) (best *Candidate, su
 		}
 		if id, ok := s.variants[qk]; ok {
 			scores[id] = max(scores[id], 0.95)
+		}
+		if l, ok := s.byID[qk]; ok {
+			scores[l.ID] = max(scores[l.ID], 1.0)
+		}
+		for _, l := range s.laws {
+			if normalize.Key(l.ID) == qk {
+				scores[l.ID] = max(scores[l.ID], 1.0)
+			}
 		}
 	}
 
@@ -122,9 +135,43 @@ func (s *Snapshot) Resolve(query string, threshold float64) (best *Candidate, su
 		return all[i].Score > all[j].Score
 	})
 	if len(all) == 0 {
-		return nil, nil
+		return nil, nil, false
+	}
+	if book, sgbQuery := normalize.ParseSGBBookQuery(query); sgbQuery {
+		sgbHits := filterSGBBookCandidates(all, book)
+		switch len(sgbHits) {
+		case 1:
+			best = &sgbHits[0]
+			for _, c := range all {
+				if c.Law.ID != best.Law.ID {
+					suggestions = append(suggestions, c)
+				}
+			}
+			if len(suggestions) > 10 {
+				suggestions = suggestions[:10]
+			}
+			return best, suggestions, false
+		case 0:
+			// No exact book hit: never accept a different SGB book or a VO collision.
+			if len(all) > 10 {
+				all = all[:10]
+			}
+			return nil, all, true
+		default:
+			if len(sgbHits) > 10 {
+				sgbHits = sgbHits[:10]
+			}
+			return nil, sgbHits, true
+		}
 	}
 	if all[0].Score >= threshold {
+		if _, sgbQuery := normalize.ParseSGBBookQuery(query); sgbQuery {
+			// SGB book queries are handled above; fallthrough must stay fail-closed.
+			if len(all) > 10 {
+				all = all[:10]
+			}
+			return nil, all, true
+		}
 		best = &all[0]
 		if len(all) > 1 {
 			suggestions = all[1:]
@@ -132,12 +179,50 @@ func (s *Snapshot) Resolve(query string, threshold float64) (best *Candidate, su
 				suggestions = suggestions[:10]
 			}
 		}
-		return best, suggestions
+		return best, suggestions, false
 	}
 	if len(all) > 10 {
 		all = all[:10]
 	}
-	return nil, all
+	return nil, all, false
+}
+
+func appendUniqueLaw(in []domain.Law, l domain.Law) []domain.Law {
+	for _, existing := range in {
+		if existing.ID == l.ID {
+			return in
+		}
+	}
+	return append(in, l)
+}
+
+func isSGBBookLaw(l domain.Law) bool {
+	return sgbBookNumber(l) > 0
+}
+
+func sgbBookNumber(l domain.Law) int {
+	// Prefer abbreviation (handles year-suffixed ids like sgb92018 + "SGB IX").
+	if n, ok := normalize.ParseSGBBookQuery(l.Abbreviation); ok {
+		return n
+	}
+	id := strings.ToLower(strings.TrimSpace(l.ID))
+	if strings.HasPrefix(id, "sgb") {
+		rest := strings.TrimLeft(id[3:], "_")
+		if n, err := strconv.Atoi(rest); err == nil && n >= 1 && n <= 20 {
+			return n
+		}
+	}
+	return 0
+}
+
+func filterSGBBookCandidates(all []Candidate, book int) []Candidate {
+	var out []Candidate
+	for _, c := range all {
+		if sgbBookNumber(c.Law) == book {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (s *Snapshot) ByID(id string) (domain.Law, bool) {

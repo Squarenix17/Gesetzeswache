@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -107,17 +108,77 @@ func (s *Server) collectMetrics(reg *metrics.Registry) {
 }
 
 func (s *Server) write(w http.ResponseWriter, status int, data any, errMsg string) {
+	s.writeWithCode(w, status, data, errMsg, "")
+}
+
+func (s *Server) writeWithCode(w http.ResponseWriter, status int, data any, errMsg, code string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	var eptr *string
 	if errMsg != "" {
 		eptr = &errMsg
 	}
+	var codePtr *string
+	if code != "" {
+		codePtr = &code
+	}
 	_ = json.NewEncoder(w).Encode(service.Envelope{
-		Success: errMsg == "" && status < 400,
-		Data:    data,
-		Error:   eptr,
+		Success:   errMsg == "" && status < 400,
+		Data:      data,
+		Error:     eptr,
+		ErrorCode: codePtr,
 	})
+}
+
+func mergeExportFreshness(query url.Values, bodyAllow, bodyParent *bool, bodyProfile string) service.ExportFreshnessOpts {
+	o := service.ParseExportFreshnessOpts(query["allow_stale"], query["parent_only"], query.Get("profile"))
+	if bodyAllow != nil && *bodyAllow {
+		o.AllowStale = true
+	}
+	if bodyParent != nil && *bodyParent {
+		o.ParentOnly = true
+	}
+	if bodyProfile != "" {
+		ingest := service.ParseExportFreshnessOpts(nil, nil, bodyProfile)
+		o.AllowStale = o.AllowStale || ingest.AllowStale
+	}
+	return o
+}
+
+func (s *Server) writeExportRefused(w http.ResponseWriter, res any, msg string) {
+	s.writeWithCode(w, http.StatusConflict, res, msg, "export_refused_confirmed_stale")
+}
+
+func (s *Server) writeOperativeBundleTooLarge(w http.ResponseWriter, err *service.OperativeBundleTooLargeError) {
+	msg := s.clientError(err)
+	data := map[string]any{
+		"max":     err.Max,
+		"actual":  err.Actual,
+		"members": err.Members,
+	}
+	s.writeWithCode(w, http.StatusBadRequest, data, msg, "operative_bundle_too_large")
+}
+
+func (s *Server) handleBundleExportError(w http.ResponseWriter, ctx context.Context, res any, err error, logLabel string) {
+	msg := s.clientError(err)
+	var tooLarge *service.OperativeBundleTooLargeError
+	switch {
+	case errors.Is(err, service.ErrQueryTooLong):
+		s.write(w, http.StatusBadRequest, nil, msg)
+	case errors.As(err, &tooLarge):
+		s.writeOperativeBundleTooLarge(w, tooLarge)
+	case msg == "export disabled", strings.HasPrefix(msg, "unknown format"), msg == "empty format list",
+		strings.HasPrefix(msg, "index:"):
+		s.write(w, http.StatusBadRequest, nil, msg)
+	case msg == "export refused: bundle member confirmed_stale", msg == "export refused: law confirmed_stale":
+		s.writeExportRefused(w, res, msg)
+	case msg == clienterr.Internal:
+		s.logError(ctx, logLabel, err)
+		s.write(w, http.StatusBadGateway, res, msg)
+	default:
+		s.logError(ctx, logLabel, err)
+		s.write(w, http.StatusBadGateway, res, clienterr.Internal)
+	}
 }
 
 func (s *Server) logError(ctx context.Context, msg string, err error) {
@@ -264,7 +325,11 @@ func (s *Server) recheck(w http.ResponseWriter, r *http.Request) {
 		_ = rc.SetWriteDeadline(time.Now().Add(recheckTimeout + recheckWriteDeadlineMargin)) //nolint:errcheck // unsupported ResponseWriter
 	}
 	id := r.URL.Query().Get("id")
-	if err := s.Svc.ForceRecheck(ctx, id); err != nil {
+	if q := r.URL.Query().Get("q"); id == "" && q != "" {
+		id = q
+	}
+	res, err := s.Svc.ForceRecheck(ctx, id)
+	if err != nil {
 		msg := s.clientError(err)
 		switch {
 		case errors.Is(err, service.ErrQueryTooLong):
@@ -283,7 +348,7 @@ func (s *Server) recheck(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	s.write(w, 200, map[string]string{"status": "recheck_completed"}, "")
+	s.write(w, 200, res, "")
 }
 
 func (s *Server) syncStatus(w http.ResponseWriter, r *http.Request) {
@@ -302,10 +367,15 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 	if len(formats) == 1 && strings.Contains(formats[0], ",") {
 		formats = strings.Split(formats[0], ",")
 	}
+	var bodyAllow, bodyParent *bool
+	var bodyProfile string
 	if q == "" && r.Body != nil && r.Body != http.NoBody {
 		var body struct {
-			Query   string   `json:"query"`
-			Formats []string `json:"formats"`
+			Query      string   `json:"query"`
+			Formats    []string `json:"formats"`
+			AllowStale *bool    `json:"allow_stale"`
+			ParentOnly *bool    `json:"parent_only"`
+			Profile    string   `json:"profile"`
 		}
 		if err := decodeJSON(w, r, &body); err != nil && err != io.EOF {
 			s.write(w, 400, nil, "invalid json body")
@@ -317,14 +387,19 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 		if len(formats) == 0 {
 			formats = body.Formats
 		}
+		bodyAllow = body.AllowStale
+		bodyParent = body.ParentOnly
+		bodyProfile = body.Profile
 	}
+	fresh := mergeExportFreshness(r.URL.Query(), bodyAllow, bodyParent, bodyProfile)
+	gate := service.ExportGateOpts{AllowStale: fresh.AllowStale}
 	var fmts []string
 	if len(formats) == 0 {
 		fmts = nil
 	} else {
 		fmts = formats
 	}
-	res, err := s.Svc.ExportText(r.Context(), q, fmts, service.MergeInclude(r.URL.Query()["include"]))
+	res, err := s.Svc.ExportText(r.Context(), q, fmts, service.MergeInclude(r.URL.Query()["include"]), gate)
 	if err != nil {
 		msg := s.clientError(err)
 		switch {
@@ -333,7 +408,7 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 		case msg == "export disabled", strings.HasPrefix(msg, "unknown format"), msg == "empty format list":
 			s.write(w, 400, nil, msg)
 		case msg == "export refused: law confirmed_stale":
-			s.write(w, 502, res, msg)
+			s.writeExportRefused(w, res, msg)
 		case msg == clienterr.Internal:
 			s.logError(r.Context(), "export", err)
 			s.write(w, 502, res, msg)
@@ -359,12 +434,17 @@ func (s *Server) bundle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	includeValues := append([]string{}, r.URL.Query()["include"]...)
+	var bodyAllow, bodyParent *bool
+	var bodyProfile string
 	if q == "" && r.Body != nil && r.Body != http.NoBody {
 		var body struct {
-			Query   string   `json:"query"`
-			Formats []string `json:"formats"`
-			Compose bool     `json:"compose"`
-			Include string   `json:"include"`
+			Query      string   `json:"query"`
+			Formats    []string `json:"formats"`
+			Compose    bool     `json:"compose"`
+			Include    string   `json:"include"`
+			AllowStale *bool    `json:"allow_stale"`
+			ParentOnly *bool    `json:"parent_only"`
+			Profile    string   `json:"profile"`
 		}
 		if err := decodeJSON(w, r, &body); err != nil && err != io.EOF {
 			s.write(w, 400, nil, "invalid json body")
@@ -380,31 +460,25 @@ func (s *Server) bundle(w http.ResponseWriter, r *http.Request) {
 		if body.Include != "" {
 			includeValues = append(includeValues, body.Include)
 		}
+		bodyAllow = body.AllowStale
+		bodyParent = body.ParentOnly
+		bodyProfile = body.Profile
 	}
 	inc := service.MergeInclude(includeValues)
-	opts := service.BundleOpts{Past: inc.Past, Compose: compose}
+	fresh := mergeExportFreshness(r.URL.Query(), bodyAllow, bodyParent, bodyProfile)
+	opts := service.BundleOpts{
+		Past:       inc.Past,
+		Compose:    compose,
+		AllowStale: fresh.AllowStale,
+		ParentOnly: fresh.ParentOnly,
+	}
 	var fmts []string
 	if len(formats) != 0 {
 		fmts = formats
 	}
 	res, err := s.Svc.ExportOperativeBundle(r.Context(), q, fmts, opts)
 	if err != nil {
-		msg := s.clientError(err)
-		switch {
-		case errors.Is(err, service.ErrQueryTooLong):
-			s.write(w, 400, nil, msg)
-		case msg == "export disabled", strings.HasPrefix(msg, "unknown format"), msg == "empty format list",
-			strings.HasPrefix(msg, "operative bundle too large"):
-			s.write(w, 400, nil, msg)
-		case msg == "export refused: bundle member confirmed_stale", msg == "export refused: law confirmed_stale":
-			s.write(w, 502, res, msg)
-		case msg == clienterr.Internal:
-			s.logError(r.Context(), "bundle", err)
-			s.write(w, 502, res, msg)
-		default:
-			s.logError(r.Context(), "bundle", err)
-			s.write(w, 502, res, clienterr.Internal)
-		}
+		s.handleBundleExportError(w, r.Context(), res, err, "bundle")
 		return
 	}
 	s.write(w, 200, res, "")
@@ -414,11 +488,16 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	sectionRaw := r.URL.Query().Get("section")
 	includeValues := append([]string{}, r.URL.Query()["include"]...)
+	var bodyAllow, bodyParent *bool
+	var bodyProfile string
 	if q == "" && r.Body != nil && r.Body != http.NoBody {
 		var body struct {
-			Query   string `json:"query"`
-			Section string `json:"section"`
-			Include string `json:"include"`
+			Query      string `json:"query"`
+			Section    string `json:"section"`
+			Include    string `json:"include"`
+			AllowStale *bool  `json:"allow_stale"`
+			ParentOnly *bool  `json:"parent_only"`
+			Profile    string `json:"profile"`
 		}
 		if err := decodeJSON(w, r, &body); err != nil && err != io.EOF {
 			s.write(w, 400, nil, "invalid json body")
@@ -433,30 +512,21 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		if body.Include != "" {
 			includeValues = append(includeValues, body.Include)
 		}
+		bodyAllow = body.AllowStale
+		bodyParent = body.ParentOnly
+		bodyProfile = body.Profile
 	}
 	inc := service.MergeInclude(includeValues)
+	fresh := mergeExportFreshness(r.URL.Query(), bodyAllow, bodyParent, bodyProfile)
 	opts := service.IndexOpts{
-		Past:     inc.Past,
-		Sections: export.ParseSectionRefs(sectionRaw),
+		Past:       inc.Past,
+		Sections:   export.ParseSectionRefs(sectionRaw),
+		AllowStale: fresh.AllowStale,
+		ParentOnly: fresh.ParentOnly,
 	}
 	res, err := s.Svc.ExportIndexChunks(r.Context(), q, opts)
 	if err != nil {
-		msg := s.clientError(err)
-		switch {
-		case errors.Is(err, service.ErrQueryTooLong):
-			s.write(w, 400, nil, msg)
-		case msg == "export disabled", strings.HasPrefix(msg, "operative bundle too large"),
-			strings.HasPrefix(msg, "index:"):
-			s.write(w, 400, nil, msg)
-		case msg == "export refused: bundle member confirmed_stale", msg == "export refused: law confirmed_stale":
-			s.write(w, 502, res, msg)
-		case msg == clienterr.Internal:
-			s.logError(r.Context(), "index", err)
-			s.write(w, 502, res, msg)
-		default:
-			s.logError(r.Context(), "index", err)
-			s.write(w, 502, res, clienterr.Internal)
-		}
+		s.handleBundleExportError(w, r.Context(), res, err, "index")
 		return
 	}
 	s.write(w, 200, res, "")

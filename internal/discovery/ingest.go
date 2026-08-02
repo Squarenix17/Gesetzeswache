@@ -94,12 +94,12 @@ func jurabkLookupKeys(jurabk string) []string {
 		if rest != "" {
 			add("SGB " + rest)
 			add("SGB_" + rest)
-			if n, ok := romanToInt(rest); ok {
+			if n, ok := normalize.RomanToInt(rest); ok {
 				add(fmt.Sprintf("SGB %d", n))
 				add(fmt.Sprintf("SGB_%d", n))
 			}
 			if n, err := strconv.Atoi(rest); err == nil {
-				if r, ok := intToRoman(n); ok {
+				if r, ok := normalize.IntToRoman(n); ok {
 					add("SGB " + r)
 					add("SGB_" + r)
 				}
@@ -107,47 +107,6 @@ func jurabkLookupKeys(jurabk string) []string {
 		}
 	}
 	return out
-}
-
-func romanToInt(s string) (int, bool) {
-	s = strings.ToUpper(strings.TrimSpace(s))
-	if s == "" || strings.IndexFunc(s, func(r rune) bool {
-		return !strings.ContainsRune("IVXLCDM", r)
-	}) >= 0 {
-		return 0, false
-	}
-	values := map[byte]int{'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
-	total := 0
-	prev := 0
-	for i := len(s) - 1; i >= 0; i-- {
-		v := values[s[i]]
-		if v < prev {
-			total -= v
-		} else {
-			total += v
-		}
-		prev = v
-	}
-	if total <= 0 {
-		return 0, false
-	}
-	return total, true
-}
-
-func intToRoman(n int) (string, bool) {
-	if n <= 0 || n > 20 {
-		return "", false
-	}
-	vals := []int{10, 9, 5, 4, 1}
-	syms := []string{"X", "IX", "V", "IV", "I"}
-	var b strings.Builder
-	for i, v := range vals {
-		for n >= v {
-			b.WriteString(syms[i])
-			n -= v
-		}
-	}
-	return b.String(), true
 }
 
 // ByTitlePhrase returns law IDs whose title matches the phrase.

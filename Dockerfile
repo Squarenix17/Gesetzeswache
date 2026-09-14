@@ -1,21 +1,25 @@
 # syntax=docker/dockerfile:1
 #
-# Digests pinned as of 2026-07-29. To update, re-resolve via
+# Digests pinned as of 2026-09-14. To update, re-resolve via
 #   docker buildx imagetools inspect <image>:<tag>
 # (or crane/skopeo), update both tag and digest, rebuild.
-FROM golang:1.26-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS build
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine@sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628 AS build
 WORKDIR /src
 RUN apk add --no-cache git ca-certificates
 COPY go.mod go.sum ./
 RUN go mod download
 COPY VERSION ./
 COPY . .
+ARG TARGETOS
+ARG TARGETARCH
 ARG VERSION
 RUN set -e; \
     V="${VERSION:-$(tr -d '[:space:]' < VERSION)}"; \
-    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w -X main.version=${V}" -o /out/gew ./cmd/gesetzeswache
+    GOOS="${TARGETOS:-linux}"; \
+    GOARCH="${TARGETARCH:-$(go env GOARCH)}"; \
+    CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" go build -ldflags="-s -w -X main.version=${V}" -o /out/gew ./cmd/gesetzeswache
 
-FROM gcr.io/distroless/static-debian12:nonroot@sha256:f5b485ea962d9bd1186b2f6b3a061191539b905b82ec395de78cbfae51f20e35
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 WORKDIR /
 COPY --from=build /out/gew /gew
 COPY variants /variants

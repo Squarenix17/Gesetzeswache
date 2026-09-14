@@ -352,7 +352,7 @@ More sync intervals and source URLs: [`.env.example`](.env.example), [`internal/
 
 ### Docker
 
-Published image: `ghcr.io/squarenix17/gesetzeswache:latest`, semver tags such as `ghcr.io/squarenix17/gesetzeswache:0.5.1`, and release tags such as `ghcr.io/squarenix17/gesetzeswache:v0.5.1` (see repo-root [`VERSION`](VERSION) and [releases](https://github.com/Squarenix17/gesetzeswache/releases)). The binary inside the image reports the same semver via `gew version` (without the `v` prefix).
+Published image: `ghcr.io/squarenix17/gesetzeswache:latest`, semver tags such as `ghcr.io/squarenix17/gesetzeswache:0.5.3`, and release tags such as `ghcr.io/squarenix17/gesetzeswache:v0.5.3` (see repo-root [`VERSION`](VERSION) and [releases](https://github.com/Squarenix17/gesetzeswache/releases)). The GHCR image is a **multi-arch index** (`linux/amd64` and `linux/arm64`) so aarch64 hosts run `gew` natively without qemu. The binary inside the image reports the same semver via `gew version` (without the `v` prefix).
 
 The image includes a `HEALTHCHECK` via `gew health`. Kubernetes can keep using `/healthz` and `/readyz`.
 
@@ -374,12 +374,13 @@ docker run --rm "gesetzeswache:${GEW_VERSION}" version   # expect same as VERSIO
 ```bash
 export IMAGE=ghcr.io/squarenix17/gesetzeswache
 export VERSION=$(tr -d '[:space:]' < VERSION)
-docker build --build-arg "VERSION=${VERSION}" -t "${IMAGE}:latest" .
-docker tag "${IMAGE}:latest" "${IMAGE}:v${VERSION}"
-docker tag "${IMAGE}:latest" "${IMAGE}:${VERSION}"
-docker push "${IMAGE}:v${VERSION}"
-docker push "${IMAGE}:${VERSION}"
-docker push "${IMAGE}:latest"
+# Multi-arch publish (CI uses the same platforms):
+docker buildx build --platform linux/amd64,linux/arm64 \
+  --build-arg "VERSION=${VERSION}" \
+  -t "${IMAGE}:latest" -t "${IMAGE}:v${VERSION}" -t "${IMAGE}:${VERSION}" \
+  --push .
+# Single-arch local build for the current host:
+docker build --build-arg "VERSION=${VERSION}" -t "${IMAGE}:local" .
 ```
 
 The checked-in [`docker-compose.yml`](docker-compose.yml) maps **host `8081` → container `8080`** so it does not collide with another service already on 8080. Adjust the left-hand port if needed.

@@ -30,7 +30,7 @@ import (
 
 // var (not const) so release builds can inject the tag via -ldflags "-X main.version=...".
 // Keep in sync with the repo-root VERSION file (used by Docker/CI).
-var version = "0.5.1"
+var version = "0.5.3"
 
 func main() {
 	os.Exit(run(os.Args[1:]))

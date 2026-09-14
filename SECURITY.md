@@ -55,7 +55,7 @@ Unexpected failures return HTTP 5xx with generic **"internal error"**; structure
 ### Supply chain
 
 - **Go 1.24** toolchain-pinned (`go1.24.5` in `go.mod`)
-- **Digest-pinned base images** in `Dockerfile` (as of 2026-07-29)
+- **Digest-pinned base images** in `Dockerfile` (as of 2026-09-14); GHCR publishes a multi-arch index (`linux/amd64` + `linux/arm64`)
 - **CI gates (blocking):** `govulncheck`, `gosec` v2.22.0, `staticcheck`, race detector, per-package coverage floors (`service`/`apihttp`/`sync`/`store` ≥80%)
 - **Release workflow:** verify → cross-platform binaries with `-ldflags -X main.version=…` → SPDX SBOM → GitHub release with `SHA256SUMS` artifacts
 

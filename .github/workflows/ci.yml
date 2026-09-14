@@ -44,7 +44,7 @@ jobs:
       - name: Build
         run: CGO_ENABLED=0 go build -o bin/gew ./cmd/gesetzeswache
   docker:
-    timeout-minutes: 15
+    timeout-minutes: 25
     needs: test
     runs-on: ubuntu-latest
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'release'
@@ -53,12 +53,14 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build and push image
+      - name: Build and push multi-arch image
         env:
           EVENT_NAME: ${{ github.event_name }}
           SHORT_SHA: ${{ github.sha }}
@@ -67,17 +69,17 @@ jobs:
           IMAGE=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')
           SHORT_SHA=$(echo "${SHORT_SHA}" | cut -c1-7)
           VERSION=$(tr -d '[:space:]' < VERSION)
-          docker build --build-arg "VERSION=${VERSION}" -t "${IMAGE}:latest" .
+          set --
           if [ "${EVENT_NAME}" = "push" ]; then
-            docker tag "${IMAGE}:latest" "${IMAGE}:sha-${SHORT_SHA}"
-            docker tag "${IMAGE}:latest" "${IMAGE}:${VERSION}"
-            docker push "${IMAGE}:latest"
-            docker push "${IMAGE}:sha-${SHORT_SHA}"
-            docker push "${IMAGE}:${VERSION}"
+            set -- -t "${IMAGE}:latest" -t "${IMAGE}:sha-${SHORT_SHA}" -t "${IMAGE}:${VERSION}"
           fi
           if [ "${EVENT_NAME}" = "release" ]; then
-            docker tag "${IMAGE}:latest" "${IMAGE}:${TAG}"
-            docker tag "${IMAGE}:latest" "${IMAGE}:${VERSION}"
-            docker push "${IMAGE}:${TAG}"
-            docker push "${IMAGE}:${VERSION}"
+            set -- -t "${IMAGE}:${TAG}" -t "${IMAGE}:${VERSION}"
           fi
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --provenance=false \
+            --push \
+            --build-arg "VERSION=${VERSION}" \
+            "$@" \
+            .
